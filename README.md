@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Happy Map
 
-## Getting Started
+A collective map of small joys. Friends contribute brief moments of happiness — a sip of coffee, an evening walk, a song stuck in their head — and the app weaves them into a fantasy-cartography map where geography itself encodes the *kind* of happiness (immediate vs. lasting, given vs. received, etc.).
 
-First, run the development server:
+Heavily inspired by [Alvin Chang's *Happy Map*](https://pudding.cool/2026/02/happy-map/) at The Pudding.
+
+## Tech stack
+
+- **Next.js 16** — App Router, TypeScript, Tailwind v4
+- **Supabase** — Postgres, Storage, Realtime
+- **Google Gemini Flash-lite** — auto-tagging each moment with a theme and agency/time scores
+- **d3** — voronoi + force layout for the cluster map
+- **Twilio** — WhatsApp ingest (planned)
+- **Vercel** — hosting
+
+## Local development
 
 ```bash
+git clone https://github.com/agfloyd/happy-map.git
+cd happy-map
+npm install
+cp .env.example .env.local   # then fill in your keys
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Supabase setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Create a project at [supabase.com](https://supabase.com).
+2. From the SQL editor, run the contents of `supabase/migrations/001_initial.sql`.
+3. Copy the project URL and the `anon` key from **Settings → API** into `.env.local`.
 
-## Learn More
+## License
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT — see [LICENSE](LICENSE).
