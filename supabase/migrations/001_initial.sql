@@ -77,3 +77,9 @@ create policy "anyone can upload happiness photos"
 create policy "anyone can view happiness photos"
   on storage.objects for select
   using (bucket_id = 'happiness-photos');
+
+-- ============================================================================
+-- Realtime — let the feed update live as new moments arrive
+-- ============================================================================
+
+alter publication supabase_realtime add table happinesses;
