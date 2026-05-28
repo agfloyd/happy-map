@@ -219,7 +219,7 @@ export function HappinessForm() {
         </div>
         <button
           type="submit"
-          disabled={pending || photoProcessing || overLimit || !content.trim()}
+          disabled={pending || photoProcessing || overLimit || !content.trim() || (!isAnonymous && !name.trim())}
           className="rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-2 text-sm font-medium disabled:opacity-40 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
         >
           {pending ? "Sharing…" : "Share"}
