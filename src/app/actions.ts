@@ -1,7 +1,10 @@
 "use server";
 
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { tagHappiness } from "@/lib/tagging";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
 
 export type SubmitResult =
@@ -44,18 +47,37 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
     photo_url = supabase.storage.from("happiness-photos").getPublicUrl(path).data.publicUrl;
   }
 
-  const { error: insertError } = await supabase.from("happinesses").insert({
-    content,
-    contributor_name: isAnonymous ? null : rawName,
-    is_anonymous: isAnonymous,
-    photo_url,
-    source: "web",
-  });
+  const contributorName = isAnonymous ? null : rawName;
 
-  if (insertError) {
+  const { data: inserted, error: insertError } = await supabase
+    .from("happinesses")
+    .insert({
+      content,
+      contributor_name: contributorName,
+      is_anonymous: isAnonymous,
+      photo_url,
+      source: "web",
+    })
+    .select("id")
+    .single();
+
+  if (insertError || !inserted) {
     console.error("insert failed", insertError);
     return { ok: false, error: "Couldn't save your moment. Try again?" };
   }
+
+  const insertedId = inserted.id;
+  after(async () => {
+    const tags = await tagHappiness({ content, contributorName });
+    if (!tags) return;
+    const { error: updateError } = await supabaseAdmin
+      .from("happinesses")
+      .update(tags)
+      .eq("id", insertedId);
+    if (updateError) {
+      console.error("[tagging] update failed", updateError);
+    }
+  });
 
   revalidatePath("/");
   return { ok: true };

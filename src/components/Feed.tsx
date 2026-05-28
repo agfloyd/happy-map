@@ -17,6 +17,20 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function TagChip({ theme, subtheme }: { theme: string; subtheme: string | null }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
+      {theme}
+      {subtheme && (
+        <>
+          <span className="mx-1 text-zinc-400 dark:text-zinc-500">·</span>
+          <span className="text-zinc-500 dark:text-zinc-400">{subtheme}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
 function HappinessCard({ h }: { h: Happiness }) {
   const displayName = h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
 
@@ -32,10 +46,16 @@ function HappinessCard({ h }: { h: Happiness }) {
           className="mt-3 rounded-xl max-h-80 w-auto border border-zinc-100 dark:border-zinc-900"
         />
       )}
-      <div className="mt-3 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
         <span className="font-medium text-zinc-700 dark:text-zinc-300">{displayName}</span>
         <span>·</span>
         <span>{timeAgo(h.created_at)}</span>
+        {h.theme && (
+          <>
+            <span>·</span>
+            <TagChip theme={h.theme} subtheme={h.subtheme} />
+          </>
+        )}
       </div>
     </article>
   );
@@ -46,7 +66,7 @@ export function Feed({ initial }: { initial: Happiness[] }) {
 
   useEffect(() => {
     const channel = supabase
-      .channel("happinesses-inserts")
+      .channel("happinesses-changes")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "happinesses" },
@@ -56,6 +76,16 @@ export function Feed({ initial }: { initial: Happiness[] }) {
             if (prev.some((p) => p.id === next.id)) return prev;
             return [next, ...prev];
           });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "happinesses" },
+        (payload) => {
+          const next = payload.new as Happiness;
+          setItems((prev) =>
+            prev.map((p) => (p.id === next.id ? { ...p, ...next } : p))
+          );
         }
       )
       .subscribe();
