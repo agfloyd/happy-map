@@ -4,12 +4,72 @@ import { useRef, useState, useTransition } from "react";
 import { submitHappiness } from "@/app/actions";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
 
+/**
+ * Resize an image File so its longest side is at most `maxDim` pixels and
+ * re-encode as JPEG at the given quality. Returns the original file if it's
+ * already small, not an image, or if we can't decode it (e.g. HEIC on some
+ * browsers).
+ */
+async function downscaleImage(
+  file: File,
+  maxDim = 1600,
+  quality = 0.85
+): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+  if (file.size < 500 * 1024) return file; // <500KB — leave alone
+
+  let img: HTMLImageElement;
+  try {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = URL.createObjectURL(file);
+    });
+  } catch {
+    return file;
+  }
+
+  const longest = Math.max(img.width, img.height);
+  if (longest <= maxDim) {
+    URL.revokeObjectURL(img.src);
+    return file;
+  }
+
+  const scale = maxDim / longest;
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    URL.revokeObjectURL(img.src);
+    return file;
+  }
+  ctx.drawImage(img, 0, 0, w, h);
+  URL.revokeObjectURL(img.src);
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((b) => resolve(b), "image/jpeg", quality);
+  });
+  if (!blob) return file;
+
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "photo";
+  return new File([blob], `${baseName}.jpg`, {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
 export function HappinessForm() {
   const [content, setContent] = useState("");
   const [name, setName] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoProcessing, setPhotoProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -19,17 +79,23 @@ export function HappinessForm() {
   const charsLeft = MAX_CONTENT_LENGTH - content.length;
   const overLimit = charsLeft < 0;
 
-  function onPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) {
+  async function onPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const original = e.target.files?.[0];
+    if (!original) {
       setPhotoFile(null);
       setPhotoPreview(null);
       return;
     }
-    setPhotoFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setPhotoPreview(reader.result as string);
-    reader.readAsDataURL(file);
+    setPhotoProcessing(true);
+    try {
+      const file = await downscaleImage(original);
+      setPhotoFile(file);
+      const reader = new FileReader();
+      reader.onload = () => setPhotoPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    } finally {
+      setPhotoProcessing(false);
+    }
   }
 
   function clearPhoto() {
@@ -113,6 +179,9 @@ export function HappinessForm() {
       <div className="mt-4">
         <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-2">
           Add a photo (optional)
+          {photoProcessing && (
+            <span className="ml-2 text-xs text-zinc-500">preparing…</span>
+          )}
         </label>
         {photoPreview ? (
           <div className="relative inline-block">
@@ -150,7 +219,7 @@ export function HappinessForm() {
         </div>
         <button
           type="submit"
-          disabled={pending || overLimit || !content.trim()}
+          disabled={pending || photoProcessing || overLimit || !content.trim()}
           className="rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-2 text-sm font-medium disabled:opacity-40 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
         >
           {pending ? "Sharing…" : "Share"}
