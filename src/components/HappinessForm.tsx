@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { submitHappiness } from "@/app/actions";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
+import { VoiceRecorder } from "@/components/VoiceRecorder";
 
 /**
  * Resize an image File so its longest side is at most `maxDim` pixels and
@@ -70,6 +71,9 @@ export function HappinessForm() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoProcessing, setPhotoProcessing] = useState(false);
+  const [voiceFile, setVoiceFile] = useState<File | null>(null);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceKey, setVoiceKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -115,6 +119,11 @@ export function HappinessForm() {
     } else {
       fd.delete("photo");
     }
+    if (voiceFile) {
+      fd.set("voice_note", voiceFile);
+    } else {
+      fd.delete("voice_note");
+    }
 
     startTransition(async () => {
       const result = await submitHappiness(fd);
@@ -123,6 +132,8 @@ export function HappinessForm() {
         setName("");
         setIsAnonymous(false);
         clearPhoto();
+        setVoiceFile(null);
+        setVoiceKey((k) => k + 1);
         formRef.current?.reset();
         setJustSubmitted(true);
       } else {
@@ -149,7 +160,6 @@ export function HappinessForm() {
         rows={3}
         maxLength={MAX_CONTENT_LENGTH + 20}
         className="w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-base placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
-        required
       />
       <div className={`mt-1 text-xs ${overLimit ? "text-red-600" : "text-zinc-500"}`}>
         {charsLeft} characters left
@@ -210,6 +220,17 @@ export function HappinessForm() {
         )}
       </div>
 
+      <div className="mt-4">
+        <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-2">
+          Or record a voice note (optional, 15s)
+        </label>
+        <VoiceRecorder
+          key={voiceKey}
+          onChange={setVoiceFile}
+          onRecordingChange={setVoiceRecording}
+        />
+      </div>
+
       <div className="mt-6 flex items-center justify-between">
         <div className="text-sm">
           {error && <p className="text-red-600">{error}</p>}
@@ -219,7 +240,14 @@ export function HappinessForm() {
         </div>
         <button
           type="submit"
-          disabled={pending || photoProcessing || overLimit || !content.trim() || (!isAnonymous && !name.trim())}
+          disabled={
+            pending ||
+            photoProcessing ||
+            voiceRecording ||
+            overLimit ||
+            (!content.trim() && !voiceFile) ||
+            (!isAnonymous && !name.trim())
+          }
           className="rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-2 text-sm font-medium disabled:opacity-40 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
         >
           {pending ? "Sharing…" : "Share"}

@@ -31,14 +31,44 @@ function TagChip({ theme, subtheme }: { theme: string; subtheme: string | null }
   );
 }
 
+function ContentBlock({ h }: { h: Happiness }) {
+  if (!h.content && h.voice_note_url) {
+    return (
+      <p className="text-base leading-relaxed text-zinc-500 dark:text-zinc-400 italic">
+        <span aria-hidden className="mr-1.5">🎙️</span>
+        Transcribing voice note…
+      </p>
+    );
+  }
+  if (h.transcribed && h.content) {
+    return (
+      <p className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 italic whitespace-pre-wrap">
+        <span aria-hidden className="mr-1.5 not-italic">🎙️</span>
+        {h.content}
+      </p>
+    );
+  }
+  return (
+    <p className="text-base leading-relaxed text-zinc-900 dark:text-zinc-100 whitespace-pre-wrap">
+      {h.content}
+    </p>
+  );
+}
+
 function HappinessCard({ h }: { h: Happiness }) {
   const displayName = h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
 
   return (
     <article className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 shadow-sm">
-      <p className="text-base leading-relaxed text-zinc-900 dark:text-zinc-100 whitespace-pre-wrap">
-        {h.content}
-      </p>
+      <ContentBlock h={h} />
+      {h.voice_note_url && (
+        <audio
+          src={h.voice_note_url}
+          controls
+          preload="metadata"
+          className="mt-3 h-9 w-full max-w-xs"
+        />
+      )}
       {h.photo_url && (
         <img
           src={h.photo_url}

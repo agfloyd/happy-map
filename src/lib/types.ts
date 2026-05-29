@@ -4,10 +4,12 @@ export type HappinessSource = "web" | "whatsapp" | "signal" | "slack" | "sms";
 
 export type Happiness = {
   id: string;
-  content: string;
+  content: string | null;
   contributor_name: string | null;
   contributor_id: string | null;
   photo_url: string | null;
+  voice_note_url: string | null;
+  transcribed: boolean;
   theme: string | null;
   subtheme: string | null;
   agency_score: number | null;

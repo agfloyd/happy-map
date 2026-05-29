@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { tagHappiness } from "@/lib/tagging";
+import { transcribeVoiceNote } from "@/lib/transcription";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
 
 export type SubmitResult =
@@ -16,9 +17,13 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
   const rawName = String(formData.get("name") ?? "").trim();
   const isAnonymous = formData.get("is_anonymous") === "true";
   const photo = formData.get("photo");
+  const voiceNote = formData.get("voice_note");
 
-  if (!content) {
-    return { ok: false, error: "Please share a moment." };
+  const hasContent = content.length > 0;
+  const hasVoice = voiceNote instanceof File && voiceNote.size > 0;
+
+  if (!hasContent && !hasVoice) {
+    return { ok: false, error: "Share a moment in text or with a voice note." };
   }
   if (content.length > MAX_CONTENT_LENGTH) {
     return { ok: false, error: `Keep it under ${MAX_CONTENT_LENGTH} characters.` };
@@ -47,15 +52,40 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
     photo_url = supabase.storage.from("happiness-photos").getPublicUrl(path).data.publicUrl;
   }
 
+  let voice_note_url: string | null = null;
+  if (hasVoice) {
+    const audio = voiceNote as File;
+    if (!audio.type.startsWith("audio/")) {
+      return { ok: false, error: "Voice note must be an audio file." };
+    }
+    if (audio.size > 5 * 1024 * 1024) {
+      return { ok: false, error: "Voice note is too large." };
+    }
+    const ext = (audio.name.split(".").pop() || "webm").toLowerCase();
+    const path = `${crypto.randomUUID()}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from("happiness-voice-notes")
+      .upload(path, audio, { contentType: audio.type, upsert: false });
+    if (uploadError) {
+      console.error("voice upload failed", uploadError);
+      return { ok: false, error: "Couldn't upload your voice note. Try again?" };
+    }
+    voice_note_url = supabase.storage
+      .from("happiness-voice-notes")
+      .getPublicUrl(path).data.publicUrl;
+  }
+
   const contributorName = isAnonymous ? null : rawName;
+  const insertContent: string | null = hasContent ? content : null;
 
   const { data: inserted, error: insertError } = await supabase
     .from("happinesses")
     .insert({
-      content,
+      content: insertContent,
       contributor_name: contributorName,
       is_anonymous: isAnonymous,
       photo_url,
+      voice_note_url,
       source: "web",
     })
     .select("id")
@@ -68,15 +98,42 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
 
   const insertedId = inserted.id;
   after(async () => {
-    const tags = await tagHappiness({ content, contributorName });
-    if (!tags) return;
+    console.log("[after] starting for", insertedId, {
+      hasVoice: !!voice_note_url,
+      hasContent: !!insertContent,
+    });
+    let finalContent = insertContent;
+
+    if (voice_note_url && !insertContent) {
+      const transcript = await transcribeVoiceNote(voice_note_url);
+      if (transcript) {
+        finalContent = transcript.slice(0, MAX_CONTENT_LENGTH);
+        const { error: tErr } = await supabaseAdmin
+          .from("happinesses")
+          .update({ content: finalContent, transcribed: true })
+          .eq("id", insertedId);
+        if (tErr) console.error("[transcription] update failed", tErr);
+        else console.log("[transcription] saved content");
+      } else {
+        console.log("[transcription] returned null — skipping content update");
+      }
+    }
+
+    if (!finalContent) {
+      console.log("[after] no final content, skipping tagging");
+      return;
+    }
+    const tags = await tagHappiness({ content: finalContent, contributorName });
+    if (!tags) {
+      console.log("[tagging] returned null — skipping update");
+      return;
+    }
     const { error: updateError } = await supabaseAdmin
       .from("happinesses")
       .update(tags)
       .eq("id", insertedId);
-    if (updateError) {
-      console.error("[tagging] update failed", updateError);
-    }
+    if (updateError) console.error("[tagging] update failed", updateError);
+    else console.log("[tagging] saved", tags.theme, tags.subtheme);
   });
 
   revalidatePath("/");
