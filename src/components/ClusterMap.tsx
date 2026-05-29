@@ -8,8 +8,8 @@ const WIDTH = 600;
 const HEIGHT = 400;
 const ATOM_COUNT = 1500;
 const LAND_RADIUS = 95;
-const FIGURE_HEIGHT = 8;
-const HIT_RADIUS = 9;
+const FIGURE_HEIGHT = 14;
+const HIT_RADIUS = 14;
 
 const THEME_COLORS: Record<string, string> = {
   food: "#f4a261",
@@ -25,7 +25,19 @@ const THEME_COLORS: Record<string, string> = {
   everyday: "#c5b9a4",
 };
 
-const OCEAN_COLOR = "#a8cce4";
+const OCEAN_COLOR = "#94c1de";
+
+// Lighten / darken a hex color by `delta` ∈ [-1, 1] (about ±18%).
+function jitterHex(hex: string, delta: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const factor = 1 + delta * 0.16;
+  const clip = (v: number) => Math.max(0, Math.min(255, Math.round(v * factor)));
+  return `#${clip(r).toString(16).padStart(2, "0")}${clip(g)
+    .toString(16)
+    .padStart(2, "0")}${clip(b).toString(16).padStart(2, "0")}`;
+}
 
 function mulberry32(seed: number) {
   return function () {
@@ -67,6 +79,8 @@ function Figure({
   onSelect: () => void;
 }) {
   const { x, y } = placed;
+  const fill = highlighted ? "#111827" : "#3f3f46";
+  const headR = highlighted ? 3.0 : 2.6;
   return (
     <g
       transform={`translate(${x},${y - FIGURE_HEIGHT})`}
@@ -76,16 +90,15 @@ function Figure({
       style={{ cursor: "pointer" }}
     >
       {/* invisible hit target for easier hovering */}
-      <circle cx={0} cy={4} r={HIT_RADIUS} fill="transparent" />
-      <circle
-        cx={0}
-        cy={1.5}
-        r={highlighted ? 2.1 : 1.6}
-        fill={highlighted ? "#111827" : "#3f3f46"}
-      />
+      <circle cx={0} cy={7} r={HIT_RADIUS} fill="transparent" />
+      {/* subtle ground shadow */}
+      <ellipse cx={0} cy={FIGURE_HEIGHT + 0.5} rx={3.2} ry={0.9} fill="rgba(0,0,0,0.18)" />
+      {/* head */}
+      <circle cx={0} cy={2.5} r={headR} fill={fill} />
+      {/* body (trapezoid) */}
       <path
-        d="M -2.2 3 L 2.2 3 L 1.6 8 L -1.6 8 Z"
-        fill={highlighted ? "#111827" : "#3f3f46"}
+        d={`M -3 5 L 3 5 L 2.2 ${FIGURE_HEIGHT} L -2.2 ${FIGURE_HEIGHT} Z`}
+        fill={fill}
       />
     </g>
   );
@@ -143,6 +156,7 @@ export function ClusterMap({
   const cells = useMemo(() => {
     const delaunay = Delaunay.from(atoms);
     const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
+    const rand = mulberry32(54321);
     const out: { d: string; color: string }[] = [];
     for (let i = 0; i < atoms.length; i++) {
       const polygon = voronoi.cellPolygon(i);
@@ -165,7 +179,13 @@ export function ClusterMap({
         isLand && placed[nearestIdx].h.theme
           ? (placed[nearestIdx].h.theme as string)
           : null;
-      const color = themeKey ? THEME_COLORS[themeKey] ?? OCEAN_COLOR : OCEAN_COLOR;
+      const baseColor = themeKey
+        ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
+        : OCEAN_COLOR;
+      // per-cell brightness jitter on land for giraffe-fur texture; keep
+      // ocean cells calm (light jitter so it still has some painterly variation).
+      const delta = (rand() - 0.5) * 2;
+      const color = jitterHex(baseColor, themeKey ? delta : delta * 0.25);
       const path =
         polygon
           .map((p, idx) =>
@@ -204,6 +224,22 @@ export function ClusterMap({
         className="block w-full h-auto"
         style={{ background: OCEAN_COLOR, aspectRatio: `${WIDTH} / ${HEIGHT}` }}
       >
+        <defs>
+          <filter id="paper-grain" x="0" y="0" width="100%" height="100%">
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="0.9"
+              numOctaves="2"
+              seed="7"
+            />
+            <feColorMatrix
+              values="0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 0.09 0"
+            />
+          </filter>
+        </defs>
         {cells.map((c, i) => (
           <path
             key={i}
@@ -213,6 +249,15 @@ export function ClusterMap({
             strokeWidth={0.4}
           />
         ))}
+        {/* paper-grain overlay across the whole map */}
+        <rect
+          x={0}
+          y={0}
+          width={WIDTH}
+          height={HEIGHT}
+          filter="url(#paper-grain)"
+          pointerEvents="none"
+        />
         {placed.map((p) => (
           <Figure
             key={p.h.id}
