@@ -1,23 +1,21 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { submitHappiness } from "@/app/actions";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
-import { VoiceRecorder } from "@/components/VoiceRecorder";
+import {
+  VoiceRecorder,
+  type VoiceRecorderHandle,
+  type Status as VoiceStatus,
+} from "@/components/VoiceRecorder";
 
-/**
- * Resize an image File so its longest side is at most `maxDim` pixels and
- * re-encode as JPEG at the given quality. Returns the original file if it's
- * already small, not an image, or if we can't decode it (e.g. HEIC on some
- * browsers).
- */
 async function downscaleImage(
   file: File,
   maxDim = 1600,
   quality = 0.85
 ): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
-  if (file.size < 500 * 1024) return file; // <500KB — leave alone
+  if (file.size < 500 * 1024) return file;
 
   let img: HTMLImageElement;
   try {
@@ -64,6 +62,73 @@ async function downscaleImage(
   });
 }
 
+function CameraIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M4 8h3l1.6-2h6.8L17 8h3v11H4z" />
+      <circle cx="12" cy="13.5" r="3.5" />
+    </svg>
+  );
+}
+
+function MicIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" />
+      <line x1="12" y1="18" x2="12" y2="21" />
+      <line x1="9" y1="21" x2="15" y2="21" />
+    </svg>
+  );
+}
+
+function IconButton({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+        active
+          ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+          : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function HappinessForm() {
   const [content, setContent] = useState("");
   const [name, setName] = useState("");
@@ -73,15 +138,37 @@ export function HappinessForm() {
   const [photoProcessing, setPhotoProcessing] = useState(false);
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceKey, setVoiceKey] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const voiceRef = useRef<VoiceRecorderHandle | null>(null);
 
   const charsLeft = MAX_CONTENT_LENGTH - content.length;
   const overLimit = charsLeft < 0;
+  const hasInput =
+    content.trim().length > 0 ||
+    !!photoFile ||
+    !!voiceFile ||
+    name.length > 0 ||
+    voiceStatus === "recording";
+  const isExpanded = expanded || hasInput;
+
+  // Click outside the form collapses it (only when empty + not busy).
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (!formRef.current) return;
+      if (formRef.current.contains(e.target as Node)) return;
+      if (hasInput || photoProcessing || voiceRecording) return;
+      setExpanded(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [hasInput, photoProcessing, voiceRecording]);
 
   async function onPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const original = e.target.files?.[0];
@@ -108,6 +195,38 @@ export function HappinessForm() {
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  function onCameraClick() {
+    if (photoFile) {
+      clearPhoto();
+      return;
+    }
+    setExpanded(true);
+    fileRef.current?.click();
+  }
+
+  function onMicClick() {
+    setExpanded(true);
+    const status = voiceRef.current?.getStatus();
+    if (status === "recording") {
+      voiceRef.current?.stop();
+    } else if (status === "recorded") {
+      voiceRef.current?.clear();
+    } else {
+      voiceRef.current?.start();
+    }
+  }
+
+  function resetAll() {
+    setContent("");
+    setName("");
+    setIsAnonymous(false);
+    clearPhoto();
+    setVoiceFile(null);
+    setVoiceKey((k) => k + 1);
+    setExpanded(false);
+    formRef.current?.reset();
+  }
+
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -128,13 +247,7 @@ export function HappinessForm() {
     startTransition(async () => {
       const result = await submitHappiness(fd);
       if (result.ok) {
-        setContent("");
-        setName("");
-        setIsAnonymous(false);
-        clearPhoto();
-        setVoiceFile(null);
-        setVoiceKey((k) => k + 1);
-        formRef.current?.reset();
+        resetAll();
         setJustSubmitted(true);
       } else {
         setError(result.error);
@@ -142,117 +255,151 @@ export function HappinessForm() {
     });
   }
 
+  const canSubmit =
+    !pending &&
+    !photoProcessing &&
+    !voiceRecording &&
+    !overLimit &&
+    (content.trim().length > 0 || !!voiceFile) &&
+    (isAnonymous || name.trim().length > 0);
+
+  const micActive = voiceStatus === "recording" || voiceStatus === "recorded";
+
   return (
     <form
       ref={formRef}
       onSubmit={handleSubmit}
-      className="w-full max-w-xl mx-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-sm"
+      className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 shadow-sm"
     >
-      <label htmlFor="content" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-        What&apos;s a small moment of happiness?
-      </label>
       <textarea
         id="content"
         name="content"
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        placeholder="e.g. Made strawberry lemonade and the first sip was perfect."
-        rows={3}
+        onFocus={() => setExpanded(true)}
+        placeholder="A small moment of happiness…"
+        rows={isExpanded ? 3 : 1}
         maxLength={MAX_CONTENT_LENGTH + 20}
-        className="w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-base placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
+        className="w-full resize-none rounded-lg bg-transparent px-1 py-1 text-sm placeholder:text-zinc-400 focus:outline-none"
       />
-      <div className={`mt-1 text-xs ${overLimit ? "text-red-600" : "text-zinc-500"}`}>
-        {charsLeft} characters left
-      </div>
 
-      <div className="mt-4 flex items-center gap-3">
-        <input
-          type="text"
-          name="name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your name"
-          disabled={isAnonymous}
-          className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50"
-        />
-        <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 whitespace-nowrap cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isAnonymous}
-            onChange={(e) => setIsAnonymous(e.target.checked)}
-            className="rounded"
-          />
-          Anonymous
-        </label>
-      </div>
+      {/* hidden file input — opened via the camera icon button */}
+      <input
+        ref={fileRef}
+        type="file"
+        name="photo"
+        accept="image/*"
+        onChange={onPhotoChange}
+        className="hidden"
+      />
 
-      <div className="mt-4">
-        <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-2">
-          Add a photo (optional)
+      {photoPreview && (
+        <div className="mt-2">
           {photoProcessing && (
-            <span className="ml-2 text-xs text-zinc-500">preparing…</span>
+            <span className="text-xs text-zinc-500">preparing…</span>
           )}
-        </label>
-        {photoPreview ? (
           <div className="relative inline-block">
             <img
               src={photoPreview}
               alt="Preview"
-              className="max-h-48 rounded-lg border border-zinc-200 dark:border-zinc-800"
+              className="max-h-40 rounded-lg border border-zinc-200 dark:border-zinc-800"
             />
             <button
               type="button"
               onClick={clearPhoto}
-              className="absolute top-2 right-2 rounded-full bg-black/70 text-white px-2 py-1 text-xs hover:bg-black/90"
+              className="absolute top-1.5 right-1.5 rounded-full bg-black/70 text-white px-2 py-0.5 text-[11px] hover:bg-black/90"
             >
               Remove
             </button>
           </div>
-        ) : (
-          <input
-            ref={fileRef}
-            type="file"
-            name="photo"
-            accept="image/*"
-            onChange={onPhotoChange}
-            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 dark:file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-zinc-200 dark:hover:file:bg-zinc-700"
-          />
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="mt-4">
-        <label className="block text-sm text-zinc-600 dark:text-zinc-400 mb-2">
-          Or record a voice note (optional, 15s)
-        </label>
+      <div className="mt-2">
         <VoiceRecorder
+          ref={voiceRef}
           key={voiceKey}
+          hideIdleButton
           onChange={setVoiceFile}
           onRecordingChange={setVoiceRecording}
+          onStatusChange={setVoiceStatus}
         />
       </div>
 
-      <div className="mt-6 flex items-center justify-between">
-        <div className="text-sm">
-          {error && <p className="text-red-600">{error}</p>}
-          {justSubmitted && !error && (
-            <p className="text-emerald-600 dark:text-emerald-500">Thanks for sharing ✨</p>
+      {isExpanded && (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="text"
+            name="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your name"
+            disabled={isAnonymous}
+            className="flex-1 min-w-0 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-1.5 text-xs placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50"
+          />
+          <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 whitespace-nowrap cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isAnonymous}
+              onChange={(e) => setIsAnonymous(e.target.checked)}
+              className="rounded"
+            />
+            Anonymous
+          </label>
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <IconButton
+            active={!!photoFile}
+            onClick={onCameraClick}
+            title={photoFile ? "Remove photo" : "Attach a photo"}
+          >
+            <CameraIcon className="h-4 w-4" />
+          </IconButton>
+          <IconButton
+            active={micActive}
+            onClick={onMicClick}
+            title={
+              voiceStatus === "recording"
+                ? "Stop recording"
+                : voiceStatus === "recorded"
+                ? "Remove voice note"
+                : "Record a voice note"
+            }
+          >
+            <MicIcon className="h-4 w-4" />
+          </IconButton>
+          {isExpanded && (
+            <span
+              className={`ml-1 text-[11px] ${
+                overLimit ? "text-red-600" : "text-zinc-400"
+              }`}
+            >
+              {charsLeft}
+            </span>
           )}
         </div>
         <button
           type="submit"
-          disabled={
-            pending ||
-            photoProcessing ||
-            voiceRecording ||
-            overLimit ||
-            (!content.trim() && !voiceFile) ||
-            (!isAnonymous && !name.trim())
-          }
-          className="rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-2 text-sm font-medium disabled:opacity-40 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+          disabled={!canSubmit}
+          className="rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-3.5 py-1.5 text-xs font-medium disabled:opacity-40 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
         >
           {pending ? "Sharing…" : "Share"}
         </button>
       </div>
+
+      {(error || justSubmitted) && (
+        <div className="mt-2 text-xs">
+          {error && <p className="text-red-600">{error}</p>}
+          {justSubmitted && !error && (
+            <p className="text-emerald-600 dark:text-emerald-500">
+              Thanks for sharing ✨
+            </p>
+          )}
+        </div>
+      )}
     </form>
   );
 }

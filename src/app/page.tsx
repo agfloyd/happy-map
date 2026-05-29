@@ -1,6 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { HappinessForm } from "@/components/HappinessForm";
-import { Feed } from "@/components/Feed";
+import { HomeView } from "@/components/HomeView";
 import type { Happiness } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -19,24 +18,17 @@ export default async function Home() {
   const initial = (data ?? []) as Happiness[];
 
   return (
-    <main className="w-full max-w-2xl mx-auto px-6 py-12 sm:py-16 space-y-10">
-      <header className="text-center">
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-balance">
+    <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+      <header className="mb-6">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
           Happy Map
         </h1>
-        <p className="mt-3 text-zinc-600 dark:text-zinc-400 text-balance">
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           A collective map of small joys, growing one moment at a time.
         </p>
       </header>
 
-      <HappinessForm />
-
-      <section>
-        <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-500 mb-4 px-1">
-          Recent moments
-        </h2>
-        <Feed initial={initial} />
-      </section>
+      <HomeView initial={initial} />
     </main>
   );
 }

@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
 import type { Happiness } from "@/lib/types";
 
 function timeAgo(iso: string): string {
@@ -19,7 +17,7 @@ function timeAgo(iso: string): string {
 
 function TagChip({ theme, subtheme }: { theme: string; subtheme: string | null }) {
   return (
-    <span className="inline-flex items-center rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
+    <span className="inline-flex items-center rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:text-zinc-300">
       {theme}
       {subtheme && (
         <>
@@ -34,49 +32,61 @@ function TagChip({ theme, subtheme }: { theme: string; subtheme: string | null }
 function ContentBlock({ h }: { h: Happiness }) {
   if (!h.content && h.voice_note_url) {
     return (
-      <p className="text-base leading-relaxed text-zinc-500 dark:text-zinc-400 italic">
-        <span aria-hidden className="mr-1.5">🎙️</span>
+      <p className="text-sm leading-snug text-zinc-500 dark:text-zinc-400 italic">
+        <span aria-hidden className="mr-1">🎙️</span>
         Transcribing voice note…
       </p>
     );
   }
   if (h.transcribed && h.content) {
     return (
-      <p className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 italic whitespace-pre-wrap">
-        <span aria-hidden className="mr-1.5 not-italic">🎙️</span>
+      <p className="text-sm leading-snug text-zinc-800 dark:text-zinc-200 italic whitespace-pre-wrap break-words">
+        <span aria-hidden className="mr-1 not-italic">🎙️</span>
         {h.content}
       </p>
     );
   }
   return (
-    <p className="text-base leading-relaxed text-zinc-900 dark:text-zinc-100 whitespace-pre-wrap">
+    <p className="text-sm leading-snug text-zinc-900 dark:text-zinc-100 whitespace-pre-wrap break-words">
       {h.content}
     </p>
   );
 }
 
-function HappinessCard({ h }: { h: Happiness }) {
+function HappinessCard({
+  h,
+  highlighted,
+}: {
+  h: Happiness;
+  highlighted: boolean;
+}) {
   const displayName = h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
 
   return (
-    <article className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 shadow-sm">
+    <article
+      className={`rounded-xl border bg-white dark:bg-zinc-950 p-3 shadow-sm transition-shadow ${
+        highlighted
+          ? "border-zinc-400 dark:border-zinc-500 ring-2 ring-zinc-300 dark:ring-zinc-600"
+          : "border-zinc-200 dark:border-zinc-800"
+      }`}
+    >
       <ContentBlock h={h} />
       {h.voice_note_url && (
         <audio
           src={h.voice_note_url}
           controls
           preload="metadata"
-          className="mt-3 h-9 w-full max-w-xs"
+          className="mt-2 h-8 w-full"
         />
       )}
       {h.photo_url && (
         <img
           src={h.photo_url}
           alt=""
-          className="mt-3 rounded-xl max-h-80 w-auto border border-zinc-100 dark:border-zinc-900"
+          className="mt-2 rounded-lg max-h-48 w-auto border border-zinc-100 dark:border-zinc-900"
         />
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
         <span className="font-medium text-zinc-700 dark:text-zinc-300">{displayName}</span>
         <span>·</span>
         <span>{timeAgo(h.created_at)}</span>
@@ -91,53 +101,26 @@ function HappinessCard({ h }: { h: Happiness }) {
   );
 }
 
-export function Feed({ initial }: { initial: Happiness[] }) {
-  const [items, setItems] = useState<Happiness[]>(initial);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("happinesses-changes")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "happinesses" },
-        (payload) => {
-          const next = payload.new as Happiness;
-          setItems((prev) => {
-            if (prev.some((p) => p.id === next.id)) return prev;
-            return [next, ...prev];
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "happinesses" },
-        (payload) => {
-          const next = payload.new as Happiness;
-          setItems((prev) =>
-            prev.map((p) => (p.id === next.id ? { ...p, ...next } : p))
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
+export function Feed({
+  items,
+  highlightedId,
+}: {
+  items: Happiness[];
+  highlightedId?: string | null;
+}) {
   if (items.length === 0) {
     return (
-      <p className="text-center text-sm text-zinc-500 dark:text-zinc-500 py-8">
+      <p className="text-center text-xs text-zinc-500 dark:text-zinc-500 py-6">
         No moments yet — be the first to share one.
       </p>
     );
   }
 
   return (
-    <ul className="space-y-4">
+    <ul className="space-y-3">
       {items.map((h) => (
-        <li key={h.id}>
-          <HappinessCard h={h} />
+        <li key={h.id} id={`feed-${h.id}`} className="scroll-mt-4">
+          <HappinessCard h={h} highlighted={highlightedId === h.id} />
         </li>
       ))}
     </ul>
