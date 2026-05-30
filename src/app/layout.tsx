@@ -13,6 +13,10 @@ export const metadata: Metadata = {
   description: "A collective map of small joys.",
 };
 
+// Runs synchronously before React hydrates so the correct theme is applied
+// without a flash. Reads localStorage first, then falls back to OS preference.
+const themeInitScript = `(function(){try{var s=localStorage.getItem('theme');var dark=s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(dark)document.documentElement.classList.add('dark');}catch(e){}})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -22,8 +26,12 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${nunito.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>{children}</body>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {children}
+      </body>
     </html>
   );
 }

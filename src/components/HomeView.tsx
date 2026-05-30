@@ -6,6 +6,25 @@ import type { Happiness } from "@/lib/types";
 import { ClusterMap, type HoverMode } from "@/components/ClusterMap";
 import { Feed } from "@/components/Feed";
 import { HappinessForm } from "@/components/HappinessForm";
+import { ThemeToggle } from "@/components/ThemeToggle";
+
+function MouseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="6" y="3" width="12" height="18" rx="6" />
+      <line x1="12" y1="7" x2="12" y2="11" />
+    </svg>
+  );
+}
 
 function ChevronRight({ className }: { className?: string }) {
   return (
@@ -52,35 +71,45 @@ function HoverModeToggle({
     <div
       role="radiogroup"
       aria-label="What to show on hover"
-      className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-0.5 text-[11px]"
+      className="group inline-flex items-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 h-8 overflow-hidden transition-all"
     >
-      <span className="px-2 text-zinc-500 dark:text-zinc-500">Hover:</span>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={mode === "full"}
-        onClick={() => onChange("full")}
-        className={`rounded-full px-2.5 py-1 transition-colors ${
-          mode === "full"
-            ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-            : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-        }`}
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center text-zinc-600 dark:text-zinc-300">
+        <MouseIcon className="h-4 w-4" />
+      </div>
+      <div
+        className="flex items-center gap-1 max-w-0 group-hover:max-w-[320px] focus-within:max-w-[320px] overflow-hidden transition-[max-width,padding] duration-300 ease-out pr-0 group-hover:pr-1 focus-within:pr-1"
+        aria-hidden="false"
       >
-        happinesses
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={mode === "name"}
-        onClick={() => onChange("name")}
-        className={`rounded-full px-2.5 py-1 transition-colors ${
-          mode === "name"
-            ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-            : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-        }`}
-      >
-        just names
-      </button>
+        <span className="pl-1 pr-0.5 text-[11px] text-zinc-500 dark:text-zinc-500 whitespace-nowrap">
+          On hover:
+        </span>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === "full"}
+          onClick={() => onChange("full")}
+          className={`rounded-full px-2.5 py-1 text-[11px] whitespace-nowrap transition-colors ${
+            mode === "full"
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+          }`}
+        >
+          happinesses
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === "name"}
+          onClick={() => onChange("name")}
+          className={`rounded-full px-2.5 py-1 text-[11px] whitespace-nowrap transition-colors ${
+            mode === "name"
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+          }`}
+        >
+          just names
+        </button>
+      </div>
     </div>
   );
 }
@@ -165,8 +194,9 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             <ChevronRight className="h-4 w-4" />
           )}
         </button>
-        <div className="mt-3 flex justify-center">
+        <div className="mt-3 flex justify-center items-center gap-2">
           <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
+          <ThemeToggle />
         </div>
       </div>
       {!feedHidden && (

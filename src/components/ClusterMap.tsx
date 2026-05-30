@@ -13,6 +13,10 @@ const HIT_RADIUS = 14;
 const MARGIN_X = 60;
 const MARGIN_Y = 48;
 const EDGE_OCEAN_BAND = 28;
+// An atom becomes a "border" — forced to ocean — when its nearest figure
+// and second-nearest figure are from DIFFERENT themes AND the two distances
+// are within this linear ratio. Higher = narrower waterways. Lower = wider.
+const BORDER_LINEAR_RATIO = 0.82;
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -363,15 +367,24 @@ export function ClusterMap({
       const polygon = voronoi.cellPolygon(i);
       if (!polygon) continue;
       const [ax, ay] = atoms[i];
+      // Track nearest AND second-nearest figure so we can detect inter-
+      // continent border zones and turn them into waterways.
       let nearestIdx = -1;
       let nearestDist = Infinity;
+      let secondIdx = -1;
+      let secondDist = Infinity;
       for (let j = 0; j < placed.length; j++) {
         const dx = placed[j].x - ax;
         const dy = placed[j].y - ay;
         const d = dx * dx + dy * dy;
         if (d < nearestDist) {
+          secondDist = nearestDist;
+          secondIdx = nearestIdx;
           nearestDist = d;
           nearestIdx = j;
+        } else if (d < secondDist) {
+          secondDist = d;
+          secondIdx = j;
         }
       }
       const inEdgeBand =
@@ -379,8 +392,22 @@ export function ClusterMap({
         ax > WIDTH - EDGE_OCEAN_BAND ||
         ay < EDGE_OCEAN_BAND ||
         ay > HEIGHT - EDGE_OCEAN_BAND;
+      // Border atom: nearest is one continent, second-nearest is a different
+      // continent, and the two distances are close (linear ratio above the
+      // threshold). Close-cluster pairs still connect by land — only diffuse
+      // boundaries become water.
+      let isBorder = false;
+      if (
+        nearestIdx >= 0 &&
+        secondIdx >= 0 &&
+        placed[nearestIdx].h.theme !== placed[secondIdx].h.theme
+      ) {
+        const linearRatio = Math.sqrt(nearestDist / Math.max(secondDist, 1e-6));
+        if (linearRatio > BORDER_LINEAR_RATIO) isBorder = true;
+      }
       const isLand =
         !inEdgeBand &&
+        !isBorder &&
         nearestIdx >= 0 &&
         nearestDist < LAND_RADIUS * LAND_RADIUS;
       const themeKey =
