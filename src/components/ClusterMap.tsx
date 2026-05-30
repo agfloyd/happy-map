@@ -10,6 +10,13 @@ const ATOM_COUNT = 1500;
 const LAND_RADIUS = 95;
 const FIGURE_HEIGHT = 14;
 const HIT_RADIUS = 14;
+// Margin from each map edge: keeps figures inward and gives every continent
+// breathing room from the rim.
+const MARGIN_X = 60; // 10% of WIDTH
+const MARGIN_Y = 48; // 12% of HEIGHT
+// Atoms within this band of any edge are always ocean — guarantees the
+// outermost ring of the map reads as water, never land.
+const EDGE_OCEAN_BAND = 28;
 
 const THEME_COLORS: Record<string, string> = {
   food: "#f4a261",
@@ -27,7 +34,38 @@ const THEME_COLORS: Record<string, string> = {
 
 const OCEAN_COLOR = "#94c1de";
 
+// Ink-tone palette for figures. Each named contributor gets a stable color
+// by hashing their name into this list. Anonymous moments use a default
+// gray.
+const PERSON_COLORS = [
+  "#2d3748", // slate
+  "#7c2d2d", // burgundy
+  "#1e3a8a", // navy
+  "#3f6212", // moss
+  "#581c87", // deep purple
+  "#7c2d12", // rust
+  "#134e4a", // teal-ink
+  "#3f3f46", // charcoal
+  "#831843", // wine
+  "#1e4258", // dark steel
+  "#854d0e", // brown gold
+  "#4c1d95", // indigo
+];
+const ANONYMOUS_COLOR = "#52525b"; // zinc-600
+
 export type HoverMode = "full" | "name";
+
+function personColor(h: { contributor_name: string | null; is_anonymous: boolean; contributor_id: string | null }): string {
+  if (h.is_anonymous) return ANONYMOUS_COLOR;
+  const key = (h.contributor_name || h.contributor_id || "").trim().toLowerCase();
+  if (!key) return ANONYMOUS_COLOR;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return PERSON_COLORS[(hash >>> 0) % PERSON_COLORS.length];
+}
 
 function mulberry32(seed: number) {
   return function () {
@@ -80,7 +118,10 @@ function Figure({
   onSelect: (e: React.MouseEvent) => void;
 }) {
   const { x, y } = placed;
-  const fill = highlighted ? "#111827" : "#3f3f46";
+  const baseFill = personColor(placed.h);
+  // When highlighted, darken slightly so identity stays visible but the
+  // figure pops.
+  const fill = highlighted ? jitterHex(baseFill, -0.45) : baseFill;
   const headR = highlighted ? 3.0 : 2.6;
   return (
     <g
@@ -127,17 +168,17 @@ function PopoverCard({
         : "voice note"
       : "moment");
   return (
-    <div className="rounded-md bg-zinc-900/95 text-white shadow-lg max-w-[280px] overflow-hidden">
+    <div className="rounded-md bg-zinc-900/95 text-white shadow-lg w-[280px] overflow-hidden">
       {h.photo_url && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={h.photo_url}
           alt=""
           loading="lazy"
-          className="block w-full max-h-[160px] object-cover"
+          className="block w-full h-auto"
         />
       )}
-      <div className="px-2.5 py-1.5 text-[11px] leading-snug whitespace-normal break-words">
+      <div className="px-2.5 py-1.5 text-[12px] leading-snug whitespace-normal break-words">
         <div className={h.transcribed ? "italic" : undefined}>
           {h.transcribed && <span className="not-italic mr-1">🎙️</span>}
           {contentText}
@@ -176,19 +217,17 @@ export function ClusterMap({
         )
         .map((h) => {
           const [jx, jy] = idJitter(h.id);
+          // Map scores into the inner padded region so extreme values don't
+          // sit on the map's rim.
+          const innerW = WIDTH - 2 * MARGIN_X;
+          const innerH = HEIGHT - 2 * MARGIN_Y;
+          const rawX = MARGIN_X + (h.time_score as number) * innerW + jx;
+          const rawY =
+            MARGIN_Y + (1 - (h.agency_score as number)) * innerH + jy;
           return {
             h,
-            x: Math.max(
-              FIGURE_HEIGHT,
-              Math.min(WIDTH - FIGURE_HEIGHT, (h.time_score as number) * WIDTH + jx)
-            ),
-            y: Math.max(
-              FIGURE_HEIGHT + 2,
-              Math.min(
-                HEIGHT - 2,
-                (1 - (h.agency_score as number)) * HEIGHT + jy
-              )
-            ),
+            x: Math.max(MARGIN_X, Math.min(WIDTH - MARGIN_X, rawX)),
+            y: Math.max(MARGIN_Y, Math.min(HEIGHT - MARGIN_Y, rawY)),
           };
         }),
     [items]
@@ -233,8 +272,17 @@ export function ClusterMap({
           nearestIdx = j;
         }
       }
+      // Atoms within the edge band are always ocean — even if a figure is
+      // close by, we want a guaranteed water ring around the map.
+      const inEdgeBand =
+        ax < EDGE_OCEAN_BAND ||
+        ax > WIDTH - EDGE_OCEAN_BAND ||
+        ay < EDGE_OCEAN_BAND ||
+        ay > HEIGHT - EDGE_OCEAN_BAND;
       const isLand =
-        nearestIdx >= 0 && nearestDist < LAND_RADIUS * LAND_RADIUS;
+        !inEdgeBand &&
+        nearestIdx >= 0 &&
+        nearestDist < LAND_RADIUS * LAND_RADIUS;
       const themeKey =
         isLand && placed[nearestIdx].h.theme
           ? (placed[nearestIdx].h.theme as string)
@@ -263,6 +311,13 @@ export function ClusterMap({
     pinnedId === shownId ? "full" : hoverMode === "name" ? "name" : "full";
   // Flip popover below figure when the figure is near the top.
   const flipBelow = shownPlaced ? shownPlaced.y < HEIGHT * 0.45 : false;
+  // Side-align popover when figure is near a horizontal edge so it can't get
+  // clipped. Threshold: ~22% from either side.
+  const xPct = shownPlaced ? (shownPlaced.x / WIDTH) * 100 : 50;
+  const xAlign: "left" | "center" | "right" =
+    xPct < 22 ? "left" : xPct > 78 ? "right" : "center";
+  const xTranslate =
+    xAlign === "left" ? "0" : xAlign === "right" ? "-100%" : "-50%";
 
   return (
     <div className="relative w-full rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
@@ -330,9 +385,7 @@ export function ClusterMap({
 
       {shownPlaced && (
         <div
-          className={`pointer-events-none absolute z-10 -translate-x-1/2 ${
-            flipBelow ? "" : "-translate-y-full"
-          }`}
+          className="pointer-events-none absolute z-10"
           style={{
             left: `${(shownPlaced.x / WIDTH) * 100}%`,
             top: flipBelow
@@ -342,21 +395,12 @@ export function ClusterMap({
               : `calc(${
                   ((shownPlaced.y - FIGURE_HEIGHT) / HEIGHT) * 100
                 }% - 6px)`,
+            transform: `translateX(${xTranslate}) translateY(${
+              flipBelow ? "0%" : "-100%"
+            })`,
           }}
         >
-          {!flipBelow && (
-            <PopoverCard h={shownPlaced.h} variant={popoverVariant} />
-          )}
-          <div
-            className={`mx-auto h-0 w-0 border-x-4 border-x-transparent ${
-              flipBelow
-                ? "border-b-4 border-b-zinc-900/95"
-                : "border-t-4 border-t-zinc-900/95"
-            }`}
-          />
-          {flipBelow && (
-            <PopoverCard h={shownPlaced.h} variant={popoverVariant} />
-          )}
+          <PopoverCard h={shownPlaced.h} variant={popoverVariant} />
         </div>
       )}
 

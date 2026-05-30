@@ -89,7 +89,7 @@ function HappinessCard({
       <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
         <span className="font-medium text-zinc-700 dark:text-zinc-300">{displayName}</span>
         <span>·</span>
-        <span>{timeAgo(h.created_at)}</span>
+        <span suppressHydrationWarning>{timeAgo(h.created_at)}</span>
         {h.theme && (
           <>
             <span>·</span>

@@ -66,7 +66,7 @@ function HoverModeToggle({
             : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
         }`}
       >
-        Full preview
+        happinesses
       </button>
       <button
         type="button"
@@ -79,7 +79,7 @@ function HoverModeToggle({
             : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
         }`}
       >
-        Name only
+        just names
       </button>
     </div>
   );
@@ -124,10 +124,8 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
   }, []);
 
   function handleSelect(id: string) {
-    if (!feedHidden) {
-      const el = document.getElementById(`feed-${id}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    // Highlight the matching feed card if it's visible, but don't scroll —
+    // the map is the main view, the page should stay put.
     setHighlightedId(id);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightedId(null), 1800);
@@ -152,18 +150,19 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           highlightedId={highlightedId}
           hoverMode={hoverMode}
         />
-        {/* feed-toggle caret on the right edge of the map */}
+        {/* feed-toggle caret pinned to the top-right corner of the map so it
+            stays visible regardless of scroll position or feed state */}
         <button
           type="button"
           onClick={() => setFeedHidden((v) => !v)}
           aria-label={feedHidden ? "Show feed" : "Hide feed"}
           title={feedHidden ? "Show feed" : "Hide feed"}
-          className="hidden lg:flex absolute top-1/2 -translate-y-1/2 -right-3 h-12 w-6 items-center justify-center rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-600 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-900 z-20"
+          className="hidden lg:flex absolute top-3 right-3 h-8 w-8 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 z-30 backdrop-blur"
         >
           {feedHidden ? (
-            <ChevronLeft className="h-3.5 w-3.5" />
+            <ChevronLeft className="h-4 w-4" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
+            <ChevronRight className="h-4 w-4" />
           )}
         </button>
         <div className="mt-3 flex justify-center">
