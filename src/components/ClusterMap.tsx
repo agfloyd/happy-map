@@ -10,13 +10,19 @@ const ATOM_COUNT = 1500;
 const LAND_RADIUS = 95;
 const FIGURE_HEIGHT = 14;
 const HIT_RADIUS = 14;
-// Margin from each map edge: keeps figures inward and gives every continent
-// breathing room from the rim.
-const MARGIN_X = 60; // 10% of WIDTH
-const MARGIN_Y = 48; // 12% of HEIGHT
-// Atoms within this band of any edge are always ocean — guarantees the
-// outermost ring of the map reads as water, never land.
+const MARGIN_X = 60;
+const MARGIN_Y = 48;
 const EDGE_OCEAN_BAND = 28;
+
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 1.5;
+
+// Zoom thresholds for label visibility
+const CONTINENT_FADE_START = 1.7;
+const CONTINENT_FADE_END = 2.4;
+const SUBTHEME_FADE_START = 1.4;
+const SUBTHEME_FADE_END = 2.0;
 
 const THEME_COLORS: Record<string, string> = {
   food: "#f4a261",
@@ -34,28 +40,32 @@ const THEME_COLORS: Record<string, string> = {
 
 const OCEAN_COLOR = "#94c1de";
 
-// Ink-tone palette for figures. Each named contributor gets a stable color
-// by hashing their name into this list. Anonymous moments use a default
-// gray.
 const PERSON_COLORS = [
-  "#2d3748", // slate
-  "#7c2d2d", // burgundy
-  "#1e3a8a", // navy
-  "#3f6212", // moss
-  "#581c87", // deep purple
-  "#7c2d12", // rust
-  "#134e4a", // teal-ink
-  "#3f3f46", // charcoal
-  "#831843", // wine
-  "#1e4258", // dark steel
-  "#854d0e", // brown gold
-  "#4c1d95", // indigo
+  "#2d3748",
+  "#7c2d2d",
+  "#1e3a8a",
+  "#3f6212",
+  "#581c87",
+  "#7c2d12",
+  "#134e4a",
+  "#3f3f46",
+  "#831843",
+  "#1e4258",
+  "#854d0e",
+  "#4c1d95",
 ];
-const ANONYMOUS_COLOR = "#52525b"; // zinc-600
+const ANONYMOUS_COLOR = "#52525b";
+
+const CONTINENT_LABEL_COLOR = "#ffffff";
+const SUBTHEME_LABEL_COLOR = "#fde68a"; // soft yellow
 
 export type HoverMode = "full" | "name";
 
-function personColor(h: { contributor_name: string | null; is_anonymous: boolean; contributor_id: string | null }): string {
+function personColor(h: {
+  contributor_name: string | null;
+  is_anonymous: boolean;
+  contributor_id: string | null;
+}): string {
   if (h.is_anonymous) return ANONYMOUS_COLOR;
   const key = (h.contributor_name || h.contributor_id || "").trim().toLowerCase();
   if (!key) return ANONYMOUS_COLOR;
@@ -98,6 +108,19 @@ function idJitter(id: string): [number, number] {
   return [(a - 0.5) * 8, (b - 0.5) * 8];
 }
 
+function clamp(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function clampPan(x: number, y: number, z: number) {
+  const maxX = WIDTH - WIDTH / z;
+  const maxY = HEIGHT - HEIGHT / z;
+  return {
+    x: clamp(x, 0, Math.max(0, maxX)),
+    y: clamp(y, 0, Math.max(0, maxY)),
+  };
+}
+
 type Placed = {
   h: Happiness;
   x: number;
@@ -119,8 +142,6 @@ function Figure({
 }) {
   const { x, y } = placed;
   const baseFill = personColor(placed.h);
-  // When highlighted, darken slightly so identity stays visible but the
-  // figure pops.
   const fill = highlighted ? jitterHex(baseFill, -0.45) : baseFill;
   const headR = highlighted ? 3.0 : 2.6;
   return (
@@ -146,13 +167,7 @@ function displayName(h: Happiness): string {
   return h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
 }
 
-function PopoverCard({
-  h,
-  variant,
-}: {
-  h: Happiness;
-  variant: "full" | "name";
-}) {
+function PopoverCard({ h, variant }: { h: Happiness; variant: "full" | "name" }) {
   if (variant === "name") {
     return (
       <div className="rounded-md bg-zinc-900/95 text-white px-2.5 py-1 text-[11px] shadow-lg">
@@ -192,6 +207,30 @@ function PopoverCard({
   );
 }
 
+function titleCase(s: string): string {
+  return s
+    .split(/\s+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function ChevronPlus() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" className="h-4 w-4" aria-hidden>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function ChevronMinus() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" className="h-4 w-4" aria-hidden>
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
 export function ClusterMap({
   items,
   onSelect,
@@ -205,6 +244,17 @@ export function ClusterMap({
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+    moved: boolean;
+  } | null>(null);
 
   const placed: Placed[] = useMemo(
     () =>
@@ -217,8 +267,6 @@ export function ClusterMap({
         )
         .map((h) => {
           const [jx, jy] = idJitter(h.id);
-          // Map scores into the inner padded region so extreme values don't
-          // sit on the map's rim.
           const innerW = WIDTH - 2 * MARGIN_X;
           const innerH = HEIGHT - 2 * MARGIN_Y;
           const rawX = MARGIN_X + (h.time_score as number) * innerW + jx;
@@ -226,14 +274,68 @@ export function ClusterMap({
             MARGIN_Y + (1 - (h.agency_score as number)) * innerH + jy;
           return {
             h,
-            x: Math.max(MARGIN_X, Math.min(WIDTH - MARGIN_X, rawX)),
-            y: Math.max(MARGIN_Y, Math.min(HEIGHT - MARGIN_Y, rawY)),
+            x: clamp(rawX, MARGIN_X, WIDTH - MARGIN_X),
+            y: clamp(rawY, MARGIN_Y, HEIGHT - MARGIN_Y),
           };
         }),
     [items]
   );
 
-  // Dismiss pinned popover on Escape
+  // Continent + subtheme centroids for labels
+  const continentLabels = useMemo(() => {
+    const groups = new Map<string, Placed[]>();
+    for (const p of placed) {
+      const k = p.h.theme as string;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(p);
+    }
+    const out: { key: string; label: string; x: number; y: number; count: number }[] = [];
+    for (const [k, ps] of groups) {
+      const sx = ps.reduce((a, p) => a + p.x, 0) / ps.length;
+      const sy = ps.reduce((a, p) => a + p.y, 0) / ps.length;
+      out.push({ key: k, label: k.toUpperCase(), x: sx, y: sy, count: ps.length });
+    }
+    return out;
+  }, [placed]);
+
+  const subthemeLabels = useMemo(() => {
+    const groups = new Map<string, Placed[]>();
+    for (const p of placed) {
+      if (!p.h.subtheme) continue;
+      const k = `${p.h.theme}::${p.h.subtheme}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(p);
+    }
+    const out: { key: string; label: string; x: number; y: number; count: number }[] = [];
+    for (const [k, ps] of groups) {
+      // Only show subtheme labels with ≥2 happinesses, to avoid label spam
+      if (ps.length < 2) continue;
+      const sx = ps.reduce((a, p) => a + p.x, 0) / ps.length;
+      const sy = ps.reduce((a, p) => a + p.y, 0) / ps.length;
+      const subthemeText = (ps[0].h.subtheme || "").trim();
+      out.push({
+        key: k,
+        label: titleCase(subthemeText),
+        x: sx,
+        y: sy,
+        count: ps.length,
+      });
+    }
+    return out;
+  }, [placed]);
+
+  const continentOpacity = clamp(
+    (CONTINENT_FADE_END - zoom) / (CONTINENT_FADE_END - CONTINENT_FADE_START),
+    0,
+    1
+  );
+  const subthemeOpacity = clamp(
+    (zoom - SUBTHEME_FADE_START) / (SUBTHEME_FADE_END - SUBTHEME_FADE_START),
+    0,
+    1
+  );
+
+  // Escape clears pin
   useEffect(() => {
     if (!pinnedId) return;
     function onKey(e: KeyboardEvent) {
@@ -272,8 +374,6 @@ export function ClusterMap({
           nearestIdx = j;
         }
       }
-      // Atoms within the edge band are always ocean — even if a figure is
-      // close by, we want a guaranteed water ring around the map.
       const inEdgeBand =
         ax < EDGE_OCEAN_BAND ||
         ax > WIDTH - EDGE_OCEAN_BAND ||
@@ -303,30 +403,124 @@ export function ClusterMap({
     return out;
   }, [atoms, placed]);
 
-  // The popover currently shown: pinned wins; otherwise hovered.
   const shownId = pinnedId ?? hoveredId;
   const shownPlaced = shownId ? placed.find((p) => p.h.id === shownId) : null;
-  // Pinned always shows full; hover obeys hoverMode.
   const popoverVariant: "full" | "name" =
     pinnedId === shownId ? "full" : hoverMode === "name" ? "name" : "full";
-  // Flip popover below figure when the figure is near the top.
-  const flipBelow = shownPlaced ? shownPlaced.y < HEIGHT * 0.45 : false;
-  // Side-align popover when figure is near a horizontal edge so it can't get
-  // clipped. Threshold: ~22% from either side.
-  const xPct = shownPlaced ? (shownPlaced.x / WIDTH) * 100 : 50;
-  const xAlign: "left" | "center" | "right" =
-    xPct < 22 ? "left" : xPct > 78 ? "right" : "center";
+
+  // Translate an SVG-space point to overlay percentage (relative to container).
+  function svgToScreenPct(x: number, y: number) {
+    const viewW = WIDTH / zoom;
+    const viewH = HEIGHT / zoom;
+    return {
+      xPct: ((x - pan.x) / viewW) * 100,
+      yPct: ((y - pan.y) / viewH) * 100,
+    };
+  }
+
+  // Zoom centered on a focal SVG point (or map center if not provided).
+  function zoomTo(newZoom: number, focalSvg?: { x: number; y: number }) {
+    const clamped = clamp(newZoom, MIN_ZOOM, MAX_ZOOM);
+    if (clamped === zoom) return;
+    const fx = focalSvg?.x ?? pan.x + WIDTH / zoom / 2;
+    const fy = focalSvg?.y ?? pan.y + HEIGHT / zoom / 2;
+    // Keep the focal point at the same screen position after zoom
+    const relX = (fx - pan.x) / (WIDTH / zoom);
+    const relY = (fy - pan.y) / (HEIGHT / zoom);
+    const newPanX = fx - relX * (WIDTH / clamped);
+    const newPanY = fy - relY * (HEIGHT / clamped);
+    setZoom(clamped);
+    setPan(clampPan(newPanX, newPanY, clamped));
+  }
+
+  function resetView() {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }
+
+  function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
+    if (e.button !== 0) return;
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+      moved: false,
+    };
+    (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
+    if (!dragRef.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (!dragRef.current.moved && Math.hypot(dx, dy) > 3) {
+      dragRef.current.moved = true;
+    }
+    if (!dragRef.current.moved) return;
+    const svgDx = (dx / rect.width) * (WIDTH / zoom);
+    const svgDy = (dy / rect.height) * (HEIGHT / zoom);
+    setPan(
+      clampPan(
+        dragRef.current.panX - svgDx,
+        dragRef.current.panY - svgDy,
+        zoom
+      )
+    );
+  }
+  function onPointerUp(e: React.PointerEvent<SVGSVGElement>) {
+    try {
+      (e.currentTarget as SVGSVGElement).releasePointerCapture(e.pointerId);
+    } catch {}
+    dragRef.current = null;
+  }
+
+  function consumedClickFromDrag(): boolean {
+    // If the user just dragged, suppress the click that fires on pointer-up.
+    // dragRef is already cleared by onPointerUp; we rely on a brief flag.
+    return false;
+  }
+
+  const viewBox = `${pan.x} ${pan.y} ${WIDTH / zoom} ${HEIGHT / zoom}`;
+
+  // Selected place's screen position
+  const popoverPos = shownPlaced
+    ? svgToScreenPct(shownPlaced.x, shownPlaced.y)
+    : null;
+  const flipBelow = popoverPos ? popoverPos.yPct < 45 : false;
+  const xAlign: "left" | "center" | "right" = popoverPos
+    ? popoverPos.xPct < 22
+      ? "left"
+      : popoverPos.xPct > 78
+      ? "right"
+      : "center"
+    : "center";
   const xTranslate =
     xAlign === "left" ? "0" : xAlign === "right" ? "-100%" : "-50%";
 
   return (
-    <div className="relative w-full rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
+    <div
+      ref={containerRef}
+      className="relative w-full rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm"
+      style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
+    >
       <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        viewBox={viewBox}
         preserveAspectRatio="xMidYMid slice"
-        className="block w-full h-auto"
-        style={{ background: OCEAN_COLOR, aspectRatio: `${WIDTH} / ${HEIGHT}` }}
-        onClick={() => setPinnedId(null)}
+        className="block w-full h-full select-none"
+        style={{
+          background: OCEAN_COLOR,
+          touchAction: "none",
+          cursor: dragRef.current?.moved ? "grabbing" : "grab",
+        }}
+        onClick={() => {
+          if (dragRef.current?.moved) return;
+          setPinnedId(null);
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         <defs>
           <filter id="paper-grain" x="0" y="0" width="100%" height="100%">
@@ -375,6 +569,7 @@ export function ClusterMap({
               setHoveredId((cur) => (cur === p.h.id ? null : cur))
             }
             onSelect={(e) => {
+              if (dragRef.current?.moved) return;
               e.stopPropagation();
               setPinnedId((cur) => (cur === p.h.id ? null : p.h.id));
               onSelect?.(p.h.id);
@@ -383,18 +578,69 @@ export function ClusterMap({
         ))}
       </svg>
 
-      {shownPlaced && (
+      {/* Continent labels (white caps, fade out on zoom-in) */}
+      {continentOpacity > 0.01 && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          {continentLabels.map((l) => {
+            const { xPct, yPct } = svgToScreenPct(l.x, l.y);
+            if (xPct < -10 || xPct > 110 || yPct < -10 || yPct > 110) return null;
+            return (
+              <div
+                key={l.key}
+                className="absolute -translate-x-1/2 -translate-y-1/2 text-[13px] sm:text-[15px] font-extrabold tracking-wider uppercase"
+                style={{
+                  left: `${xPct}%`,
+                  top: `${yPct}%`,
+                  color: CONTINENT_LABEL_COLOR,
+                  opacity: continentOpacity,
+                  textShadow:
+                    "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
+                  transition: "opacity 200ms",
+                }}
+              >
+                {l.label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Subtheme labels (yellow, fade in on zoom-in) */}
+      {subthemeOpacity > 0.01 && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          {subthemeLabels.map((l) => {
+            const { xPct, yPct } = svgToScreenPct(l.x, l.y);
+            if (xPct < -10 || xPct > 110 || yPct < -10 || yPct > 110) return null;
+            return (
+              <div
+                key={l.key}
+                className="absolute -translate-x-1/2 -translate-y-1/2 text-[11px] sm:text-[12px] font-semibold italic"
+                style={{
+                  left: `${xPct}%`,
+                  top: `${yPct}%`,
+                  color: SUBTHEME_LABEL_COLOR,
+                  opacity: subthemeOpacity,
+                  textShadow:
+                    "0 1px 2px rgba(0,0,0,0.8), -1px -1px 0 rgba(40,30,0,0.7), 1px -1px 0 rgba(40,30,0,0.7), -1px 1px 0 rgba(40,30,0,0.7), 1px 1px 0 rgba(40,30,0,0.7)",
+                  transition: "opacity 200ms",
+                }}
+              >
+                {l.label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Popover */}
+      {shownPlaced && popoverPos && (
         <div
           className="pointer-events-none absolute z-10"
           style={{
-            left: `${(shownPlaced.x / WIDTH) * 100}%`,
+            left: `${popoverPos.xPct}%`,
             top: flipBelow
-              ? `calc(${
-                  ((shownPlaced.y + 4) / HEIGHT) * 100
-                }% + 4px)`
-              : `calc(${
-                  ((shownPlaced.y - FIGURE_HEIGHT) / HEIGHT) * 100
-                }% - 6px)`,
+              ? `calc(${popoverPos.yPct}% + 8px)`
+              : `calc(${popoverPos.yPct}% - ${(FIGURE_HEIGHT / (HEIGHT / zoom)) * 100}% - 6px)`,
             transform: `translateX(${xTranslate}) translateY(${
               flipBelow ? "0%" : "-100%"
             })`,
@@ -404,11 +650,105 @@ export function ClusterMap({
         </div>
       )}
 
+      {/* Zoom controls — bottom-left */}
+      <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 z-20">
+        <button
+          type="button"
+          onClick={() => zoomTo(zoom * ZOOM_STEP)}
+          disabled={zoom >= MAX_ZOOM - 0.01}
+          aria-label="Zoom in"
+          title="Zoom in"
+          className="h-8 w-8 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronPlus />
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomTo(zoom / ZOOM_STEP)}
+          disabled={zoom <= MIN_ZOOM + 0.01}
+          aria-label="Zoom out"
+          title="Zoom out"
+          className="h-8 w-8 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronMinus />
+        </button>
+        {zoom > 1.01 && (
+          <button
+            type="button"
+            onClick={resetView}
+            aria-label="Reset view"
+            title="Reset view"
+            className="h-7 px-2 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-[10px] font-medium text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+
+      {/* Compass — bottom-right */}
+      <Compass placed={placed} pan={pan} zoom={zoom} />
+
       {placed.length === 0 && (
         <p className="text-center text-xs text-zinc-500 dark:text-zinc-400 py-2 italic absolute bottom-0 inset-x-0 bg-white/70 dark:bg-zinc-900/70">
           The map fills in as moments are tagged.
         </p>
       )}
+    </div>
+  );
+}
+
+function Compass({
+  placed,
+  pan,
+  zoom,
+}: {
+  placed: Placed[];
+  pan: { x: number; y: number };
+  zoom: number;
+}) {
+  const W = 90;
+  const H = 60;
+  // Scale SVG coords → compass coords
+  const sx = (x: number) => (x / WIDTH) * W;
+  const sy = (y: number) => (y / HEIGHT) * H;
+
+  const viewX = sx(pan.x);
+  const viewY = sy(pan.y);
+  const viewW = sx(WIDTH / zoom);
+  const viewH = sy(HEIGHT / zoom);
+
+  return (
+    <div className="pointer-events-none absolute bottom-3 right-3 z-20">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width={W}
+        height={H}
+        className="rounded-md shadow-lg border border-zinc-300/70 dark:border-zinc-700/70 bg-white/85 dark:bg-zinc-900/85 backdrop-blur"
+      >
+        {/* axes */}
+        <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="rgba(0,0,0,0.12)" strokeWidth={0.5} />
+        <line x1={W / 2} y1={0} x2={W / 2} y2={H} stroke="rgba(0,0,0,0.12)" strokeWidth={0.5} />
+        {placed.map((p) => (
+          <circle
+            key={p.h.id}
+            cx={sx(p.x)}
+            cy={sy(p.y)}
+            r={1.4}
+            fill="#e89bb1"
+            opacity={0.55}
+          />
+        ))}
+        <rect
+          x={viewX}
+          y={viewY}
+          width={viewW}
+          height={viewH}
+          fill="none"
+          stroke="#ef4444"
+          strokeWidth={1.2}
+          rx={1}
+        />
+      </svg>
     </div>
   );
 }
