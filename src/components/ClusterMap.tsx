@@ -264,6 +264,14 @@ export function ClusterMap({
     panY: number;
     moved: boolean;
   } | null>(null);
+  const animRef = useRef<number | null>(null);
+
+  // Cancel any in-flight zoom animation on unmount.
+  useEffect(() => {
+    return () => {
+      if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    };
+  }, []);
 
   const placed: Placed[] = useMemo(
     () =>
@@ -450,28 +458,66 @@ export function ClusterMap({
     };
   }
 
+  // Animate zoom + pan smoothly from current state to a target. The
+  // useMemo'd cells/labels don't recompute per frame; we just re-render
+  // the SVG viewBox + overlay positions, which is cheap.
+  function animateView(
+    targetZoom: number,
+    targetPan: { x: number; y: number },
+    durationMs = 500
+  ) {
+    if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    const startZoom = zoom;
+    const startPan = { ...pan };
+    const startTime = performance.now();
+
+    function step(now: number) {
+      const t = Math.min(1, (now - startTime) / durationMs);
+      // ease-out cubic
+      const e = 1 - Math.pow(1 - t, 3);
+      const newZoom = startZoom + (targetZoom - startZoom) * e;
+      const newPan = {
+        x: startPan.x + (targetPan.x - startPan.x) * e,
+        y: startPan.y + (targetPan.y - startPan.y) * e,
+      };
+      setZoom(newZoom);
+      setPan(clampPan(newPan.x, newPan.y, newZoom));
+      if (t < 1) {
+        animRef.current = requestAnimationFrame(step);
+      } else {
+        animRef.current = null;
+      }
+    }
+    animRef.current = requestAnimationFrame(step);
+  }
+
   // Zoom centered on a focal SVG point (or map center if not provided).
   function zoomTo(newZoom: number, focalSvg?: { x: number; y: number }) {
     const clamped = clamp(newZoom, MIN_ZOOM, MAX_ZOOM);
-    if (clamped === zoom) return;
+    if (Math.abs(clamped - zoom) < 0.001) return;
     const fx = focalSvg?.x ?? pan.x + WIDTH / zoom / 2;
     const fy = focalSvg?.y ?? pan.y + HEIGHT / zoom / 2;
-    // Keep the focal point at the same screen position after zoom
     const relX = (fx - pan.x) / (WIDTH / zoom);
     const relY = (fy - pan.y) / (HEIGHT / zoom);
-    const newPanX = fx - relX * (WIDTH / clamped);
-    const newPanY = fy - relY * (HEIGHT / clamped);
-    setZoom(clamped);
-    setPan(clampPan(newPanX, newPanY, clamped));
+    const targetPan = clampPan(
+      fx - relX * (WIDTH / clamped),
+      fy - relY * (HEIGHT / clamped),
+      clamped
+    );
+    animateView(clamped, targetPan);
   }
 
   function resetView() {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    animateView(1, { x: 0, y: 0 });
   }
 
   function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
     if (e.button !== 0) return;
+    // If a zoom animation is in flight, cut it short so dragging feels instant.
+    if (animRef.current !== null) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
@@ -711,17 +757,22 @@ export function ClusterMap({
         >
           <ChevronMinus />
         </button>
-        {zoom > 1.01 && (
-          <button
-            type="button"
-            onClick={resetView}
-            aria-label="Reset view"
-            title="Reset view"
-            className="h-7 px-2 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-[10px] font-medium text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur"
-          >
-            Reset
-          </button>
-        )}
+        {/* Reset is always rendered so + and − never shift; fades when not needed */}
+        <button
+          type="button"
+          onClick={resetView}
+          aria-label="Reset view"
+          title="Reset view"
+          aria-hidden={zoom <= 1.01}
+          tabIndex={zoom <= 1.01 ? -1 : 0}
+          className={`h-7 px-2 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-[10px] font-medium text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur transition-opacity duration-200 ${
+            zoom <= 1.01
+              ? "opacity-0 pointer-events-none"
+              : "opacity-100"
+          }`}
+        >
+          Reset
+        </button>
       </div>
 
       {/* Compass — bottom-right */}
@@ -745,49 +796,109 @@ function Compass({
   pan: { x: number; y: number };
   zoom: number;
 }) {
-  const W = 90;
-  const H = 60;
-  // Scale SVG coords → compass coords
-  const sx = (x: number) => (x / WIDTH) * W;
-  const sy = (y: number) => (y / HEIGHT) * H;
+  // Compass is a square — it represents the conceptual score space
+  // (agency × time), which is square even though the rendered map is 3:2.
+  const W = 110;
+  const H = 110;
+  const PAD = 12; // inner padding so axis lines / dots stay inside the box
 
-  const viewX = sx(pan.x);
-  const viewY = sy(pan.y);
-  const viewW = sx(WIDTH / zoom);
-  const viewH = sy(HEIGHT / zoom);
+  // Map a point in SVG-space (the actual map's coordinate system) to a
+  // point in compass-space. The inner score range [0,1]×[0,1] is mapped
+  // to the compass's inner box, so a happiness with (time=0, agency=1)
+  // sits at the top-left of the dots area.
+  function svgToCompass(sx: number, sy: number): [number, number] {
+    const innerMapW = WIDTH - 2 * MARGIN_X;
+    const innerMapH = HEIGHT - 2 * MARGIN_Y;
+    const tx = (sx - MARGIN_X) / innerMapW;
+    const ty = (sy - MARGIN_Y) / innerMapH;
+    const innerCompass = W - 2 * PAD;
+    return [PAD + tx * innerCompass, PAD + ty * innerCompass];
+  }
+
+  // Viewport rectangle in compass coords. The map's viewBox extends into
+  // the margin area, so values can go slightly outside [PAD, W-PAD].
+  // Clamp visually but keep the rectangle's aspect ratio honest.
+  const [vx1, vy1] = svgToCompass(pan.x, pan.y);
+  const [vx2, vy2] = svgToCompass(
+    pan.x + WIDTH / zoom,
+    pan.y + HEIGHT / zoom
+  );
+  const rx1 = Math.max(2, vx1);
+  const ry1 = Math.max(2, vy1);
+  const rx2 = Math.min(W - 2, vx2);
+  const ry2 = Math.min(H - 2, vy2);
 
   return (
-    <div className="pointer-events-none absolute bottom-3 right-3 z-20">
+    <div
+      className="pointer-events-none absolute bottom-3 right-3 z-20"
+      style={{ width: W, height: H }}
+    >
       <svg
         viewBox={`0 0 ${W} ${H}`}
         width={W}
         height={H}
         className="rounded-md shadow-lg border border-zinc-300/70 dark:border-zinc-700/70 bg-white/85 dark:bg-zinc-900/85 backdrop-blur"
       >
-        {/* axes */}
-        <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="rgba(0,0,0,0.12)" strokeWidth={0.5} />
-        <line x1={W / 2} y1={0} x2={W / 2} y2={H} stroke="rgba(0,0,0,0.12)" strokeWidth={0.5} />
-        {placed.map((p) => (
-          <circle
-            key={p.h.id}
-            cx={sx(p.x)}
-            cy={sy(p.y)}
-            r={1.4}
-            fill="#e89bb1"
-            opacity={0.55}
-          />
-        ))}
+        {/* axis lines */}
+        <line
+          x1={PAD}
+          y1={H / 2}
+          x2={W - PAD}
+          y2={H / 2}
+          className="stroke-zinc-700/60 dark:stroke-zinc-300/50"
+          strokeWidth={0.6}
+        />
+        <line
+          x1={W / 2}
+          y1={PAD}
+          x2={W / 2}
+          y2={H - PAD}
+          className="stroke-zinc-700/60 dark:stroke-zinc-300/50"
+          strokeWidth={0.6}
+        />
+        {/* dots */}
+        {placed.map((p) => {
+          const [cx, cy] = svgToCompass(p.x, p.y);
+          return (
+            <circle
+              key={p.h.id}
+              cx={cx}
+              cy={cy}
+              r={1.1}
+              fill="#e89bb1"
+              opacity={0.6}
+            />
+          );
+        })}
+        {/* viewport rectangle */}
         <rect
-          x={viewX}
-          y={viewY}
-          width={viewW}
-          height={viewH}
+          x={rx1}
+          y={ry1}
+          width={Math.max(0, rx2 - rx1)}
+          height={Math.max(0, ry2 - ry1)}
           fill="none"
           stroke="#ef4444"
           strokeWidth={1.2}
           rx={1}
         />
       </svg>
+      {/* axis labels — HTML overlay so we get full Tailwind/font control */}
+      <div
+        className="absolute inset-0 text-[8px] font-bold tracking-wide text-zinc-800 dark:text-zinc-100 [text-shadow:0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95)] dark:[text-shadow:0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9)]"
+      >
+        <span className="absolute top-1 left-1/2 -translate-x-1/2 whitespace-nowrap leading-none">
+          More agency
+        </span>
+        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap leading-none">
+          Less agency
+        </span>
+        <span className="absolute left-1 top-1/2 -translate-y-1/2 whitespace-nowrap leading-none">
+          Immediate
+        </span>
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 whitespace-nowrap leading-none">
+          Long-term
+        </span>
+      </div>
     </div>
   );
 }
