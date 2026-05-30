@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Delaunay } from "d3-delaunay";
 import type { Happiness } from "@/lib/types";
 
@@ -27,7 +27,17 @@ const THEME_COLORS: Record<string, string> = {
 
 const OCEAN_COLOR = "#94c1de";
 
-// Lighten / darken a hex color by `delta` ∈ [-1, 1] (about ±18%).
+export type HoverMode = "full" | "name";
+
+function mulberry32(seed: number) {
+  return function () {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function jitterHex(hex: string, delta: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -37,15 +47,6 @@ function jitterHex(hex: string, delta: number): string {
   return `#${clip(r).toString(16).padStart(2, "0")}${clip(g)
     .toString(16)
     .padStart(2, "0")}${clip(b).toString(16).padStart(2, "0")}`;
-}
-
-function mulberry32(seed: number) {
-  return function () {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 function idJitter(id: string): [number, number] {
@@ -76,7 +77,7 @@ function Figure({
   highlighted: boolean;
   onEnter: () => void;
   onLeave: () => void;
-  onSelect: () => void;
+  onSelect: (e: React.MouseEvent) => void;
 }) {
   const { x, y } = placed;
   const fill = highlighted ? "#111827" : "#3f3f46";
@@ -89,13 +90,9 @@ function Figure({
       onClick={onSelect}
       style={{ cursor: "pointer" }}
     >
-      {/* invisible hit target for easier hovering */}
       <circle cx={0} cy={7} r={HIT_RADIUS} fill="transparent" />
-      {/* subtle ground shadow */}
       <ellipse cx={0} cy={FIGURE_HEIGHT + 0.5} rx={3.2} ry={0.9} fill="rgba(0,0,0,0.18)" />
-      {/* head */}
       <circle cx={0} cy={2.5} r={headR} fill={fill} />
-      {/* body (trapezoid) */}
       <path
         d={`M -3 5 L 3 5 L 2.2 ${FIGURE_HEIGHT} L -2.2 ${FIGURE_HEIGHT} Z`}
         fill={fill}
@@ -104,16 +101,69 @@ function Figure({
   );
 }
 
+function displayName(h: Happiness): string {
+  return h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
+}
+
+function PopoverCard({
+  h,
+  variant,
+}: {
+  h: Happiness;
+  variant: "full" | "name";
+}) {
+  if (variant === "name") {
+    return (
+      <div className="rounded-md bg-zinc-900/95 text-white px-2.5 py-1 text-[11px] shadow-lg">
+        {displayName(h)}
+      </div>
+    );
+  }
+  const contentText =
+    h.content ??
+    (h.voice_note_url
+      ? h.transcribed === false
+        ? "Transcribing voice note…"
+        : "voice note"
+      : "moment");
+  return (
+    <div className="rounded-md bg-zinc-900/95 text-white shadow-lg max-w-[280px] overflow-hidden">
+      {h.photo_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={h.photo_url}
+          alt=""
+          loading="lazy"
+          className="block w-full max-h-[160px] object-cover"
+        />
+      )}
+      <div className="px-2.5 py-1.5 text-[11px] leading-snug whitespace-normal break-words">
+        <div className={h.transcribed ? "italic" : undefined}>
+          {h.transcribed && <span className="not-italic mr-1">🎙️</span>}
+          {contentText}
+        </div>
+        <div className="mt-1 text-[10px] text-zinc-300">
+          {displayName(h)}
+          {h.theme ? ` · ${h.theme}` : ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ClusterMap({
   items,
   onSelect,
   highlightedId,
+  hoverMode = "full",
 }: {
   items: Happiness[];
   onSelect?: (id: string) => void;
   highlightedId?: string | null;
+  hoverMode?: HoverMode;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
 
   const placed: Placed[] = useMemo(
     () =>
@@ -143,6 +193,16 @@ export function ClusterMap({
         }),
     [items]
   );
+
+  // Dismiss pinned popover on Escape
+  useEffect(() => {
+    if (!pinnedId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setPinnedId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pinnedId]);
 
   const atoms = useMemo(() => {
     const rand = mulberry32(12345);
@@ -182,8 +242,6 @@ export function ClusterMap({
       const baseColor = themeKey
         ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
         : OCEAN_COLOR;
-      // per-cell brightness jitter on land for giraffe-fur texture; keep
-      // ocean cells calm (light jitter so it still has some painterly variation).
       const delta = (rand() - 0.5) * 2;
       const color = jitterHex(baseColor, themeKey ? delta : delta * 0.25);
       const path =
@@ -197,24 +255,14 @@ export function ClusterMap({
     return out;
   }, [atoms, placed]);
 
-  const hovered = hoveredId ? placed.find((p) => p.h.id === hoveredId) : null;
-  const tooltipText = hovered
-    ? hovered.h.summary ||
-      (hovered.h.content
-        ? hovered.h.content.length > 80
-          ? hovered.h.content.slice(0, 78) + "…"
-          : hovered.h.content
-        : hovered.h.transcribed
-        ? "voice note"
-        : "moment")
-    : null;
-  const tooltipSub = hovered
-    ? `${
-        hovered.h.is_anonymous
-          ? "Anonymous"
-          : hovered.h.contributor_name || "Anonymous"
-      }${hovered.h.theme ? ` · ${hovered.h.theme}` : ""}`
-    : null;
+  // The popover currently shown: pinned wins; otherwise hovered.
+  const shownId = pinnedId ?? hoveredId;
+  const shownPlaced = shownId ? placed.find((p) => p.h.id === shownId) : null;
+  // Pinned always shows full; hover obeys hoverMode.
+  const popoverVariant: "full" | "name" =
+    pinnedId === shownId ? "full" : hoverMode === "name" ? "name" : "full";
+  // Flip popover below figure when the figure is near the top.
+  const flipBelow = shownPlaced ? shownPlaced.y < HEIGHT * 0.45 : false;
 
   return (
     <div className="relative w-full rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm">
@@ -223,6 +271,7 @@ export function ClusterMap({
         preserveAspectRatio="xMidYMid slice"
         className="block w-full h-auto"
         style={{ background: OCEAN_COLOR, aspectRatio: `${WIDTH} / ${HEIGHT}` }}
+        onClick={() => setPinnedId(null)}
       >
         <defs>
           <filter id="paper-grain" x="0" y="0" width="100%" height="100%">
@@ -249,7 +298,6 @@ export function ClusterMap({
             strokeWidth={0.4}
           />
         ))}
-        {/* paper-grain overlay across the whole map */}
         <rect
           x={0}
           y={0}
@@ -262,33 +310,53 @@ export function ClusterMap({
           <Figure
             key={p.h.id}
             placed={p}
-            highlighted={hoveredId === p.h.id || highlightedId === p.h.id}
+            highlighted={
+              hoveredId === p.h.id ||
+              pinnedId === p.h.id ||
+              highlightedId === p.h.id
+            }
             onEnter={() => setHoveredId(p.h.id)}
             onLeave={() =>
               setHoveredId((cur) => (cur === p.h.id ? null : cur))
             }
-            onSelect={() => onSelect?.(p.h.id)}
+            onSelect={(e) => {
+              e.stopPropagation();
+              setPinnedId((cur) => (cur === p.h.id ? null : p.h.id));
+              onSelect?.(p.h.id);
+            }}
           />
         ))}
       </svg>
 
-      {hovered && tooltipText && (
+      {shownPlaced && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full"
+          className={`pointer-events-none absolute z-10 -translate-x-1/2 ${
+            flipBelow ? "" : "-translate-y-full"
+          }`}
           style={{
-            left: `${(hovered.x / WIDTH) * 100}%`,
-            top: `calc(${((hovered.y - FIGURE_HEIGHT) / HEIGHT) * 100}% - 6px)`,
+            left: `${(shownPlaced.x / WIDTH) * 100}%`,
+            top: flipBelow
+              ? `calc(${
+                  ((shownPlaced.y + 4) / HEIGHT) * 100
+                }% + 4px)`
+              : `calc(${
+                  ((shownPlaced.y - FIGURE_HEIGHT) / HEIGHT) * 100
+                }% - 6px)`,
           }}
         >
-          <div className="rounded-md bg-zinc-900/95 text-white px-2.5 py-1.5 text-[11px] leading-snug shadow-lg max-w-[240px] whitespace-normal">
-            <div className="font-medium">{tooltipText}</div>
-            {tooltipSub && (
-              <div className="mt-0.5 text-[10px] text-zinc-300">
-                {tooltipSub}
-              </div>
-            )}
-          </div>
-          <div className="mx-auto h-0 w-0 border-x-4 border-x-transparent border-t-4 border-t-zinc-900/95" />
+          {!flipBelow && (
+            <PopoverCard h={shownPlaced.h} variant={popoverVariant} />
+          )}
+          <div
+            className={`mx-auto h-0 w-0 border-x-4 border-x-transparent ${
+              flipBelow
+                ? "border-b-4 border-b-zinc-900/95"
+                : "border-t-4 border-t-zinc-900/95"
+            }`}
+          />
+          {flipBelow && (
+            <PopoverCard h={shownPlaced.h} variant={popoverVariant} />
+          )}
         </div>
       )}
 
