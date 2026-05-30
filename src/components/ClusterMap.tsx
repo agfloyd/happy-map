@@ -134,12 +134,14 @@ type Placed = {
 function Figure({
   placed,
   highlighted,
+  figureScale,
   onEnter,
   onLeave,
   onSelect,
 }: {
   placed: Placed;
   highlighted: boolean;
+  figureScale: number;
   onEnter: () => void;
   onLeave: () => void;
   onSelect: (e: React.MouseEvent) => void;
@@ -148,9 +150,12 @@ function Figure({
   const baseFill = personColor(placed.h);
   const fill = highlighted ? jitterHex(baseFill, -0.45) : baseFill;
   const headR = highlighted ? 3.0 : 2.6;
+  // Scale around the figure's feet (which sit at SVG coord y). This makes
+  // figures grow sub-linearly with zoom — they get bigger as you zoom in,
+  // but more slowly than the viewBox does, so more land shows vs people.
   return (
     <g
-      transform={`translate(${x},${y - FIGURE_HEIGHT})`}
+      transform={`translate(${x},${y}) scale(${figureScale}) translate(0,${-FIGURE_HEIGHT})`}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onClick={onSelect}
@@ -509,6 +514,12 @@ export function ClusterMap({
   }
 
   const viewBox = `${pan.x} ${pan.y} ${WIDTH / zoom} ${HEIGHT / zoom}`;
+  // Figures grow as ~zoom^0.5 in screen px (instead of the zoom^1 the viewBox
+  // implies). The counter-scale applied in SVG coords is therefore zoom^-0.5.
+  const figureScale = Math.pow(1 / zoom, 0.5);
+  // Effective figure height in SVG coords at the current zoom — used to
+  // place the popover just above the head.
+  const effectiveFigureHeight = FIGURE_HEIGHT * figureScale;
 
   // Selected place's screen position
   const popoverPos = shownPlaced
@@ -586,6 +597,7 @@ export function ClusterMap({
           <Figure
             key={p.h.id}
             placed={p}
+            figureScale={figureScale}
             highlighted={
               hoveredId === p.h.id ||
               pinnedId === p.h.id ||
@@ -667,7 +679,7 @@ export function ClusterMap({
             left: `${popoverPos.xPct}%`,
             top: flipBelow
               ? `calc(${popoverPos.yPct}% + 8px)`
-              : `calc(${popoverPos.yPct}% - ${(FIGURE_HEIGHT / (HEIGHT / zoom)) * 100}% - 6px)`,
+              : `calc(${popoverPos.yPct}% - ${(effectiveFigureHeight / (HEIGHT / zoom)) * 100}% - 6px)`,
             transform: `translateX(${xTranslate}) translateY(${
               flipBelow ? "0%" : "-100%"
             })`,
