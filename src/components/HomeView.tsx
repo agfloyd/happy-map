@@ -12,16 +12,14 @@ function MouseIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      fill="none"
+      fill="currentColor"
       stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
+      strokeWidth={1.2}
       strokeLinejoin="round"
       className={className}
       aria-hidden
     >
-      <rect x="6" y="3" width="12" height="18" rx="6" />
-      <line x1="12" y1="7" x2="12" y2="11" />
+      <path d="M4 3 L4 19.5 L9 15 L11.6 21 L14 20 L11.4 14 L17.5 14 Z" />
     </svg>
   );
 }

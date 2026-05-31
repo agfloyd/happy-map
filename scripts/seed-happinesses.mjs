@@ -34,17 +34,19 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
 });
 
 const ALLOWED_THEMES = new Set([
-  "food",
-  "nature",
-  "movement",
-  "creative",
-  "connection",
-  "rest",
-  "play",
-  "discovery",
-  "achievement",
-  "ritual",
-  "everyday",
+  "family",
+  "friends and social",
+  "love",
+  "children",
+  "personal growth",
+  "career and work",
+  "education",
+  "hobbies and creation",
+  "leisure",
+  "sensory pleasure",
+  "domestic maintenance",
+  "material acquisition",
+  "serendipity",
 ]);
 const ALLOWED_SOURCES = new Set(["web", "whatsapp", "signal", "slack", "sms"]);
 

@@ -5,17 +5,19 @@ import { z } from "zod";
 const MODEL_ID = "gemini-3.1-flash-lite-preview";
 
 export const THEMES = [
-  "food",
-  "nature",
-  "movement",
-  "creative",
-  "connection",
-  "rest",
-  "play",
-  "discovery",
-  "achievement",
-  "ritual",
-  "everyday",
+  "family",
+  "friends and social",
+  "love",
+  "children",
+  "personal growth",
+  "career and work",
+  "education",
+  "hobbies and creation",
+  "leisure",
+  "sensory pleasure",
+  "domestic maintenance",
+  "material acquisition",
+  "serendipity",
 ] as const;
 
 export type Theme = (typeof THEMES)[number];
@@ -86,14 +88,28 @@ function buildPrompt({
   const author = contributorName ? `\nAuthor: ${contributorName}` : "";
   return `You are tagging a small moment of happiness for a personal "happy map" inspired by Alvin Chang's research at The Pudding.
 
-For the moment below, classify it on two axes:
-- agency_score (0.0–1.0): how much agency the person had over the moment. 0.0 = passive, it happened to them; 1.0 = entirely their own initiative.
-- time_score (0.0–1.0): how much time was invested in this moment. 0.0 = a fleeting instant; 1.0 = the result of long-term effort or buildup.
+Score the moment on two axes:
+- agency_score (0.0–1.0): how much agency the person had over the moment. 0.0 = entirely passive, it happened to them; 1.0 = entirely their own initiative.
+- time_score (0.0–1.0): how much time was invested. 0.0 = a fleeting instant; 1.0 = the result of long-term effort or buildup.
 
-Pick exactly one theme from this closed list:
-${THEMES.map((t) => `- ${t}`).join("\n")}
+Pick exactly one theme from this closed list. The list is taken from Alvin Chang's three-level happiness taxonomy and is meant to be exhaustive — every happy moment should fit somewhere. Pick the BEST single fit even if more than one applies; lean toward the relationship/role-based category when the moment is fundamentally about a person (e.g. "playing legos with my niece" → family, not leisure).
 
-Then give a 1-3 word subtheme that's more specific than the theme.
+Themes (each line: theme — short meaning):
+- family — moments centered on parents, siblings, extended family, family rituals, family milestones (NOT specifically about a child as the focal point — use children for that)
+- friends and social — time with friends, social gatherings, parties, casual chats
+- love — romantic partner, dating, intimacy, anniversaries, partner-only moments
+- children — moments centered on a child (your own kid, niece/nephew, godchild, neighbor kid). Use when the child is the focal point: kid said something, kid did something, kid hit a milestone, kid being a kid. If the family unit is the focal point, prefer family.
+- personal growth — self-reflection, healing, therapy, gratitude, becoming-a-better-person moments
+- career and work — job, projects, work milestones, recognition, coworker moments
+- education — school, classes, studying, learning a skill in a structured way, graduation
+- hobbies and creation — making things: cooking a new dish, painting, writing, gardening, DIY, music-making
+- leisure — passive enjoyment: TV, movies, video games, books, scrolling, lounging, vacations
+- sensory pleasure — fleeting bodily delight: a warm shower, a great bite of food, a breeze, a sunset, a hug, a good smell
+- domestic maintenance — cleaning, organizing, errands, cooking-as-chore, taking the dog out, fixing things at home
+- material acquisition — buying or receiving things: a new gadget, clothes, a gift received
+- serendipity — pure happenstance: a lucky find, a coincidence that brightened the day, a small windfall, bumping into someone unexpectedly, a stranger's kindness you didn't initiate. Hint: agency_score should be very low (≤0.2) for these.
+
+Then give a 1-3 word subtheme that's more specific than the theme (e.g. "sibling time", "anniversary dinner", "kitchen experiment", "warm shower"). Use noun-phrase form, lowercase.
 
 Finally, write a short noun-phrase summary (under 80 characters) capturing the gist.
 

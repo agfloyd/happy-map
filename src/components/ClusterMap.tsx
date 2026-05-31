@@ -7,16 +7,20 @@ import type { Happiness } from "@/lib/types";
 const WIDTH = 600;
 const HEIGHT = 400;
 const ATOM_COUNT = 1500;
-const LAND_RADIUS = 95;
+// Per-figure influence radius for the land-claim score. Each figure
+// contributes (R − d)² to its theme's score at every atom inside R. The
+// theme with the highest summed score claims the atom. Bigger = larger
+// continents that bridge across loosely-packed members.
+const INFLUENCE_R = 115;
 const FIGURE_HEIGHT = 14;
 const HIT_RADIUS = 14;
 const MARGIN_X = 60;
 const MARGIN_Y = 48;
 const EDGE_OCEAN_BAND = 28;
-// An atom becomes a "border" — forced to ocean — when its nearest figure
-// and second-nearest figure are from DIFFERENT themes AND the two distances
-// are within this linear ratio. Higher = narrower waterways. Lower = wider.
-const BORDER_LINEAR_RATIO = 0.82;
+// An atom becomes a "border" — forced to ocean — when the top theme's
+// summed score is close to the runner-up's. Compared as
+// sqrt(secondScore/topScore); higher threshold = narrower waterways.
+const BORDER_SCORE_RATIO = 0.82;
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -29,17 +33,19 @@ const SUBTHEME_FADE_START = 1.4;
 const SUBTHEME_FADE_END = 2.0;
 
 const THEME_COLORS: Record<string, string> = {
-  food: "#f4a261",
-  nature: "#8ab87a",
-  movement: "#7fb8d4",
-  creative: "#b08fc7",
-  connection: "#e89bb1",
-  rest: "#c8b6e2",
-  play: "#f1d57c",
-  discovery: "#88c7c3",
-  achievement: "#d4a574",
-  ritual: "#94a3c2",
-  everyday: "#c5b9a4",
+  family: "#d4a574", // warm tan
+  "friends and social": "#f4a261", // peach
+  love: "#e89bb1", // rose
+  children: "#efb198", // soft coral
+  "personal growth": "#8ab87a", // sage green
+  "career and work": "#94a3c2", // slate blue
+  education: "#b08fc7", // soft purple
+  "hobbies and creation": "#f1d57c", // golden yellow
+  leisure: "#88c7c3", // teal
+  "sensory pleasure": "#c8b6e2", // lilac
+  "domestic maintenance": "#c5b9a4", // dusty olive
+  "material acquisition": "#7fb8d4", // sky blue
+  serendipity: "#d9e08a", // chartreuse (lucky-find color)
 };
 
 const OCEAN_COLOR = "#94c1de";
@@ -306,11 +312,49 @@ export function ClusterMap({
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k)!.push(p);
     }
-    const out: { key: string; label: string; x: number; y: number; count: number }[] = [];
+    const raw: { key: string; label: string; x: number; y: number; count: number }[] = [];
     for (const [k, ps] of groups) {
       const sx = ps.reduce((a, p) => a + p.x, 0) / ps.length;
       const sy = ps.reduce((a, p) => a + p.y, 0) / ps.length;
-      out.push({ key: k, label: k.toUpperCase(), x: sx, y: sy, count: ps.length });
+      raw.push({ key: k, label: k.toUpperCase(), x: sx, y: sy, count: ps.length });
+    }
+    // Collision avoidance: many of our 11 categories cluster in the same
+    // agency/time region (e.g. Career, Education, Hobbies all sit at high
+    // agency + long-term). Sort by member count desc, then try to place each
+    // subsequent label near its centroid; if it can't fit without overlapping
+    // a higher-priority label inside the map bounds, drop it (subtheme labels
+    // at higher zoom will still appear for these themes).
+    const MIN_X = 145; // ≥ longest label "DOMESTIC MAINTENANCE" / "HOBBIES AND CREATION"
+    const MIN_Y = 24;
+    const Y_MIN = 18;
+    const Y_MAX = HEIGHT - 18;
+    const sorted = [...raw].sort((a, b) => b.count - a.count);
+    const out: typeof raw = [];
+    for (const l of sorted) {
+      // Try positions in order: original, then below by 1·MIN_Y, above by
+      // 1·MIN_Y, below by 2·MIN_Y, above by 2·MIN_Y, etc. — preferring small
+      // displacement and skipping any position that falls outside the band.
+      const candidates: number[] = [l.y];
+      for (let k = 1; k <= 4; k++) {
+        candidates.push(l.y + k * MIN_Y, l.y - k * MIN_Y);
+      }
+      const x = l.x;
+      let placedY: number | null = null;
+      for (const cy of candidates) {
+        if (cy < Y_MIN || cy > Y_MAX) continue;
+        const collides = out.some(
+          (p) => Math.abs(p.x - x) < MIN_X && Math.abs(p.y - cy) < MIN_Y
+        );
+        if (!collides) {
+          placedY = cy;
+          break;
+        }
+      }
+      if (placedY !== null) {
+        out.push({ ...l, x, y: placedY });
+      }
+      // Else: skip this label entirely — the colored continent still shows,
+      // and the subtheme labels will fill in once the user zooms in.
     }
     return out;
   }, [placed]);
@@ -375,29 +419,40 @@ export function ClusterMap({
     const delaunay = Delaunay.from(atoms);
     const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
     const rand = mulberry32(54321);
+    const INFLUENCE_R2 = INFLUENCE_R * INFLUENCE_R;
     const out: { d: string; color: string }[] = [];
     for (let i = 0; i < atoms.length; i++) {
       const polygon = voronoi.cellPolygon(i);
       if (!polygon) continue;
       const [ax, ay] = atoms[i];
-      // Track nearest AND second-nearest figure so we can detect inter-
-      // continent border zones and turn them into waterways.
-      let nearestIdx = -1;
-      let nearestDist = Infinity;
-      let secondIdx = -1;
-      let secondDist = Infinity;
+      // Per-theme summed quadratic falloff. Each figure adds (R−d)² to its
+      // own theme's score at this atom, for all figures within R. Whichever
+      // theme accumulates the highest score claims the atom. This produces
+      // organic continents that bend and stretch to encompass elongated
+      // member clusters — the opposite of the perfect circles you get from a
+      // simple nearest-figure rule.
+      const score = new Map<string, number>();
       for (let j = 0; j < placed.length; j++) {
         const dx = placed[j].x - ax;
         const dy = placed[j].y - ay;
-        const d = dx * dx + dy * dy;
-        if (d < nearestDist) {
-          secondDist = nearestDist;
-          secondIdx = nearestIdx;
-          nearestDist = d;
-          nearestIdx = j;
-        } else if (d < secondDist) {
-          secondDist = d;
-          secondIdx = j;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < INFLUENCE_R2) {
+          const d = Math.sqrt(d2);
+          const c = INFLUENCE_R - d;
+          const t = placed[j].h.theme as string;
+          score.set(t, (score.get(t) ?? 0) + c * c);
+        }
+      }
+      let topTheme: string | null = null;
+      let topScore = 0;
+      let secondScore = 0;
+      for (const [t, s] of score) {
+        if (s > topScore) {
+          secondScore = topScore;
+          topScore = s;
+          topTheme = t;
+        } else if (s > secondScore) {
+          secondScore = s;
         }
       }
       const inEdgeBand =
@@ -405,28 +460,16 @@ export function ClusterMap({
         ax > WIDTH - EDGE_OCEAN_BAND ||
         ay < EDGE_OCEAN_BAND ||
         ay > HEIGHT - EDGE_OCEAN_BAND;
-      // Border atom: nearest is one continent, second-nearest is a different
-      // continent, and the two distances are close (linear ratio above the
-      // threshold). Close-cluster pairs still connect by land — only diffuse
-      // boundaries become water.
+      // Border atom: top two themes are competing closely → waterway.
+      // Tight, well-clustered themes stay solid because their internal atoms
+      // have one dominant theme; only diffuse boundaries become water.
       let isBorder = false;
-      if (
-        nearestIdx >= 0 &&
-        secondIdx >= 0 &&
-        placed[nearestIdx].h.theme !== placed[secondIdx].h.theme
-      ) {
-        const linearRatio = Math.sqrt(nearestDist / Math.max(secondDist, 1e-6));
-        if (linearRatio > BORDER_LINEAR_RATIO) isBorder = true;
+      if (topTheme !== null && secondScore > 0) {
+        const ratio = Math.sqrt(secondScore / topScore);
+        if (ratio > BORDER_SCORE_RATIO) isBorder = true;
       }
-      const isLand =
-        !inEdgeBand &&
-        !isBorder &&
-        nearestIdx >= 0 &&
-        nearestDist < LAND_RADIUS * LAND_RADIUS;
-      const themeKey =
-        isLand && placed[nearestIdx].h.theme
-          ? (placed[nearestIdx].h.theme as string)
-          : null;
+      const isLand = !inEdgeBand && !isBorder && topTheme !== null;
+      const themeKey = isLand ? topTheme : null;
       const baseColor = themeKey
         ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
         : OCEAN_COLOR;
@@ -798,9 +841,9 @@ function Compass({
 }) {
   // Compass is a square — it represents the conceptual score space
   // (agency × time), which is square even though the rendered map is 3:2.
-  const W = 110;
-  const H = 110;
-  const PAD = 12; // inner padding so axis lines / dots stay inside the box
+  const W = 138;
+  const H = 138;
+  const PAD = 15; // inner padding so axis lines / dots stay inside the box
 
   // Map a point in SVG-space (the actual map's coordinate system) to a
   // point in compass-space. The inner score range [0,1]×[0,1] is mapped
@@ -864,7 +907,7 @@ function Compass({
               key={p.h.id}
               cx={cx}
               cy={cy}
-              r={1.1}
+              r={1.4}
               fill="#e89bb1"
               opacity={0.6}
             />
@@ -884,7 +927,7 @@ function Compass({
       </svg>
       {/* axis labels — HTML overlay so we get full Tailwind/font control */}
       <div
-        className="absolute inset-0 text-[8px] font-bold tracking-wide text-zinc-800 dark:text-zinc-100 [text-shadow:0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95)] dark:[text-shadow:0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9)]"
+        className="absolute inset-0 text-[10px] font-bold tracking-wide text-zinc-800 dark:text-zinc-100 [text-shadow:0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95)] dark:[text-shadow:0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9)]"
       >
         <span className="absolute top-1 left-1/2 -translate-x-1/2 whitespace-nowrap leading-none">
           More agency
@@ -892,10 +935,12 @@ function Compass({
         <span className="absolute bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap leading-none">
           Less agency
         </span>
-        <span className="absolute left-1 top-1/2 -translate-y-1/2 whitespace-nowrap leading-none">
+        {/* Immediate / Long-term sit just above the horizontal axis instead
+            of straddling it, so the axis line stays visible. */}
+        <span className="absolute left-1 top-[45%] -translate-y-1/2 whitespace-nowrap leading-none">
           Immediate
         </span>
-        <span className="absolute right-1 top-1/2 -translate-y-1/2 whitespace-nowrap leading-none">
+        <span className="absolute right-1 top-[45%] -translate-y-1/2 whitespace-nowrap leading-none">
           Long-term
         </span>
       </div>
