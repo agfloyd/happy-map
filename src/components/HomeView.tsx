@@ -193,8 +193,8 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           )}
         </button>
         <div className="mt-3 flex justify-center items-center gap-2">
-          <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
           <ThemeToggle />
+          <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
         </div>
       </div>
       {!feedHidden && (
