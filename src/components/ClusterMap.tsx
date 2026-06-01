@@ -11,16 +11,22 @@ const ATOM_COUNT = 1500;
 // contributes (R − d)² to its theme's score at every atom inside R. The
 // theme with the highest summed score claims the atom. Bigger = larger
 // continents that bridge across loosely-packed members.
-const INFLUENCE_R = 115;
+// Max distance from an atom to its claimed figure. Beyond this, the atom
+// is ocean. Sets the overall size of each figure's Voronoi-style cell.
+const LAND_R = 110;
 const FIGURE_HEIGHT = 14;
 const HIT_RADIUS = 14;
 const MARGIN_X = 60;
 const MARGIN_Y = 48;
 const EDGE_OCEAN_BAND = 28;
-// An atom becomes a "border" — forced to ocean — when the top theme's
-// summed score is close to the runner-up's. Compared as
-// sqrt(secondScore/topScore); higher threshold = narrower waterways.
-const BORDER_SCORE_RATIO = 0.82;
+// An atom becomes a "border" — forced to ocean — when the nearest figure
+// and the second-nearest figure are from DIFFERENT themes AND their
+// distances are within this linear ratio. Higher = narrower waterways.
+const BORDER_LINEAR_RATIO = 0.86;
+// When a figure's raw (agency, time) position lands inside another theme's
+// continent (or on a waterway), snap it to the nearest atom of its OWN
+// theme — within this max displacement. Outliers beyond this stay put.
+const MAX_SNAP_DIST = 70;
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -304,38 +310,208 @@ export function ClusterMap({
     [items]
   );
 
-  // Continent + subtheme centroids for labels
+  const atoms = useMemo(() => {
+    const rand = mulberry32(12345);
+    const pts: [number, number][] = [];
+    for (let i = 0; i < ATOM_COUNT; i++) {
+      pts.push([rand() * WIDTH, rand() * HEIGHT]);
+    }
+    return pts;
+  }, []);
+
+  const { cellPaths, atomThemes } = useMemo(() => {
+    const delaunay = Delaunay.from(atoms);
+    const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
+    const rand = mulberry32(54321);
+    const LAND_R2 = LAND_R * LAND_R;
+    const paths: { d: string; color: string }[] = [];
+    const themes: (string | null)[] = [];
+    for (let i = 0; i < atoms.length; i++) {
+      const polygon = voronoi.cellPolygon(i);
+      if (!polygon) {
+        themes.push(null);
+        continue;
+      }
+      const [ax, ay] = atoms[i];
+      // Nearest-figure rule: each atom belongs to the theme of the figure
+      // closest to it. This is essentially a Voronoi at the figure level —
+      // every figure gets its own cell, and adjacent cells of the same
+      // theme merge visually into a single continent. So every theme is
+      // GUARANTEED territory proportional to its member count, and every
+      // figure sits inside its own theme's land.
+      let nearestIdx = -1;
+      let nearestD2 = Infinity;
+      let secondIdx = -1;
+      let secondD2 = Infinity;
+      for (let j = 0; j < placed.length; j++) {
+        const dx = placed[j].x - ax;
+        const dy = placed[j].y - ay;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < nearestD2) {
+          secondD2 = nearestD2;
+          secondIdx = nearestIdx;
+          nearestD2 = d2;
+          nearestIdx = j;
+        } else if (d2 < secondD2) {
+          secondD2 = d2;
+          secondIdx = j;
+        }
+      }
+      const inEdgeBand =
+        ax < EDGE_OCEAN_BAND ||
+        ax > WIDTH - EDGE_OCEAN_BAND ||
+        ay < EDGE_OCEAN_BAND ||
+        ay > HEIGHT - EDGE_OCEAN_BAND;
+      // Waterway between cells of DIFFERENT themes: when the two nearest
+      // figures are close in distance and from different themes, force
+      // ocean. Same-theme neighbours still merge into one continent.
+      let isBorder = false;
+      if (
+        nearestIdx >= 0 &&
+        secondIdx >= 0 &&
+        placed[nearestIdx].h.theme !== placed[secondIdx].h.theme
+      ) {
+        const ratio = Math.sqrt(nearestD2 / Math.max(secondD2, 1e-6));
+        if (ratio > BORDER_LINEAR_RATIO) isBorder = true;
+      }
+      const isLand =
+        !inEdgeBand &&
+        !isBorder &&
+        nearestIdx >= 0 &&
+        nearestD2 < LAND_R2;
+      const themeKey = isLand
+        ? (placed[nearestIdx].h.theme as string)
+        : null;
+      themes.push(themeKey);
+      const baseColor = themeKey
+        ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
+        : OCEAN_COLOR;
+      const delta = (rand() - 0.5) * 2;
+      const color = jitterHex(baseColor, themeKey ? delta : delta * 0.25);
+      const path =
+        polygon
+          .map((p, idx) =>
+            idx === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`
+          )
+          .join(" ") + "Z";
+      paths.push({ d: path, color });
+    }
+    return { cellPaths: paths, atomThemes: themes };
+  }, [atoms, placed]);
+
+  // Snap each figure onto its own theme's land. Pure falloff above produces
+  // clean continents, but a figure's raw (agency, time) position may land
+  // inside a neighbouring theme's continent — especially in contested
+  // regions. We pull each such figure to the nearest atom of its OWN theme,
+  // capped at MAX_SNAP_DIST so distant outliers still read honestly.
+  const placedSnapped: Placed[] = useMemo(() => {
+    if (atomThemes.length === 0 || atoms.length === 0 || placed.length === 0) {
+      return placed;
+    }
+    const MAX_SNAP_D2 = MAX_SNAP_DIST * MAX_SNAP_DIST;
+    return placed.map((p) => {
+      // First, which atom does this figure currently sit inside?
+      let nearestAtomIdx = 0;
+      let nearestD2 = Infinity;
+      for (let i = 0; i < atoms.length; i++) {
+        const dx = atoms[i][0] - p.x;
+        const dy = atoms[i][1] - p.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < nearestD2) {
+          nearestD2 = d2;
+          nearestAtomIdx = i;
+        }
+      }
+      // Already on its own theme's land? Leave it.
+      if (atomThemes[nearestAtomIdx] === p.h.theme) {
+        return p;
+      }
+      // Find the nearest atom that IS on this figure's theme, within reach.
+      let bestIdx = -1;
+      let bestD2 = MAX_SNAP_D2;
+      for (let i = 0; i < atoms.length; i++) {
+        if (atomThemes[i] !== p.h.theme) continue;
+        const dx = atoms[i][0] - p.x;
+        const dy = atoms[i][1] - p.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestIdx = i;
+        }
+      }
+      // No same-theme atom within MAX_SNAP_DIST → leave the outlier put.
+      if (bestIdx < 0) return p;
+      // Snap to the atom, with a small id-jitter so co-located snaps don't
+      // pile exactly on top of each other.
+      const [jx, jy] = idJitter(p.h.id);
+      return {
+        ...p,
+        x: atoms[bestIdx][0] + jx * 0.4,
+        y: atoms[bestIdx][1] + jy * 0.4,
+      };
+    });
+  }, [placed, atoms, atomThemes]);
+
+  // Continent labels — positioned at the ATOM centroid of each theme's
+  // claimed land, not the figure centroid. This puts the label inside the
+  // continent the user actually sees, even when the continent stretches far
+  // from its members' raw (agency,time) positions.
   const continentLabels = useMemo(() => {
-    const groups = new Map<string, Placed[]>();
+    type G = { sumX: number; sumY: number; atomCount: number; figureCount: number };
+    const groups = new Map<string, G>();
+    const ensure = (k: string): G => {
+      let g = groups.get(k);
+      if (!g) {
+        g = { sumX: 0, sumY: 0, atomCount: 0, figureCount: 0 };
+        groups.set(k, g);
+      }
+      return g;
+    };
+    for (let i = 0; i < atoms.length; i++) {
+      const t = atomThemes[i];
+      if (!t) continue;
+      const [ax, ay] = atoms[i];
+      const g = ensure(t);
+      g.sumX += ax;
+      g.sumY += ay;
+      g.atomCount++;
+    }
     for (const p of placed) {
-      const k = p.h.theme as string;
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(p);
+      ensure(p.h.theme as string).figureCount++;
     }
     const raw: { key: string; label: string; x: number; y: number; count: number }[] = [];
-    for (const [k, ps] of groups) {
-      const sx = ps.reduce((a, p) => a + p.x, 0) / ps.length;
-      const sy = ps.reduce((a, p) => a + p.y, 0) / ps.length;
-      raw.push({ key: k, label: k.toUpperCase(), x: sx, y: sy, count: ps.length });
+    // Every theme with figures should be labeled — nearest-figure Voronoi
+    // guarantees each one some land. Still skip themes whose continent is
+    // so small that a label would be larger than the land it sits on.
+    const MIN_ATOMS_FOR_LABEL = 5;
+    for (const [t, g] of groups) {
+      if (g.atomCount < MIN_ATOMS_FOR_LABEL) continue;
+      raw.push({
+        key: t,
+        label: t.toUpperCase(),
+        x: g.sumX / g.atomCount,
+        y: g.sumY / g.atomCount,
+        count: g.figureCount,
+      });
     }
-    // Collision avoidance: many of our 11 categories cluster in the same
-    // agency/time region (e.g. Career, Education, Hobbies all sit at high
-    // agency + long-term). Sort by member count desc, then try to place each
-    // subsequent label near its centroid; if it can't fit without overlapping
-    // a higher-priority label inside the map bounds, drop it (subtheme labels
-    // at higher zoom will still appear for these themes).
-    const MIN_X = 145; // ≥ longest label "DOMESTIC MAINTENANCE" / "HOBBIES AND CREATION"
-    const MIN_Y = 24;
-    const Y_MIN = 18;
-    const Y_MAX = HEIGHT - 18;
-    const sorted = [...raw].sort((a, b) => b.count - a.count);
+    // Collision avoidance: sort by figure count desc (priority) with an
+    // alphabetical tiebreak so the same labels survive across refreshes.
+    // For each label try the centroid first, then small vertical nudges in
+    // each direction. If none fit, drop the label rather than stacking it.
+    // MIN_X covers the rendered width of the longest labels ("MATERIAL
+    // ACQUISITION", "HOBBIES AND CREATION") in SVG units so two long
+    // neighbours never sit on the same row.
+    const MIN_X = 140;
+    const MIN_Y = 22;
+    const Y_MIN = 16;
+    const Y_MAX = HEIGHT - 16;
+    const sorted = [...raw].sort(
+      (a, b) => b.count - a.count || a.key.localeCompare(b.key)
+    );
     const out: typeof raw = [];
     for (const l of sorted) {
-      // Try positions in order: original, then below by 1·MIN_Y, above by
-      // 1·MIN_Y, below by 2·MIN_Y, above by 2·MIN_Y, etc. — preferring small
-      // displacement and skipping any position that falls outside the band.
       const candidates: number[] = [l.y];
-      for (let k = 1; k <= 4; k++) {
+      for (let k = 1; k <= 6; k++) {
         candidates.push(l.y + k * MIN_Y, l.y - k * MIN_Y);
       }
       const x = l.x;
@@ -353,15 +529,15 @@ export function ClusterMap({
       if (placedY !== null) {
         out.push({ ...l, x, y: placedY });
       }
-      // Else: skip this label entirely — the colored continent still shows,
-      // and the subtheme labels will fill in once the user zooms in.
     }
     return out;
-  }, [placed]);
+  }, [atoms, atomThemes, placed]);
 
   const subthemeLabels = useMemo(() => {
+    // Use SNAPPED positions so subtheme labels sit on the same continent as
+    // the figures the user actually sees.
     const groups = new Map<string, Placed[]>();
-    for (const p of placed) {
+    for (const p of placedSnapped) {
       if (!p.h.subtheme) continue;
       const k = `${p.h.theme}::${p.h.subtheme}`;
       if (!groups.has(k)) groups.set(k, []);
@@ -383,7 +559,7 @@ export function ClusterMap({
       });
     }
     return out;
-  }, [placed]);
+  }, [placedSnapped]);
 
   const continentOpacity = clamp(
     (CONTINENT_FADE_END - zoom) / (CONTINENT_FADE_END - CONTINENT_FADE_START),
@@ -406,88 +582,8 @@ export function ClusterMap({
     return () => window.removeEventListener("keydown", onKey);
   }, [pinnedId]);
 
-  const atoms = useMemo(() => {
-    const rand = mulberry32(12345);
-    const pts: [number, number][] = [];
-    for (let i = 0; i < ATOM_COUNT; i++) {
-      pts.push([rand() * WIDTH, rand() * HEIGHT]);
-    }
-    return pts;
-  }, []);
-
-  const cells = useMemo(() => {
-    const delaunay = Delaunay.from(atoms);
-    const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
-    const rand = mulberry32(54321);
-    const INFLUENCE_R2 = INFLUENCE_R * INFLUENCE_R;
-    const out: { d: string; color: string }[] = [];
-    for (let i = 0; i < atoms.length; i++) {
-      const polygon = voronoi.cellPolygon(i);
-      if (!polygon) continue;
-      const [ax, ay] = atoms[i];
-      // Per-theme summed quadratic falloff. Each figure adds (R−d)² to its
-      // own theme's score at this atom, for all figures within R. Whichever
-      // theme accumulates the highest score claims the atom. This produces
-      // organic continents that bend and stretch to encompass elongated
-      // member clusters — the opposite of the perfect circles you get from a
-      // simple nearest-figure rule.
-      const score = new Map<string, number>();
-      for (let j = 0; j < placed.length; j++) {
-        const dx = placed[j].x - ax;
-        const dy = placed[j].y - ay;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < INFLUENCE_R2) {
-          const d = Math.sqrt(d2);
-          const c = INFLUENCE_R - d;
-          const t = placed[j].h.theme as string;
-          score.set(t, (score.get(t) ?? 0) + c * c);
-        }
-      }
-      let topTheme: string | null = null;
-      let topScore = 0;
-      let secondScore = 0;
-      for (const [t, s] of score) {
-        if (s > topScore) {
-          secondScore = topScore;
-          topScore = s;
-          topTheme = t;
-        } else if (s > secondScore) {
-          secondScore = s;
-        }
-      }
-      const inEdgeBand =
-        ax < EDGE_OCEAN_BAND ||
-        ax > WIDTH - EDGE_OCEAN_BAND ||
-        ay < EDGE_OCEAN_BAND ||
-        ay > HEIGHT - EDGE_OCEAN_BAND;
-      // Border atom: top two themes are competing closely → waterway.
-      // Tight, well-clustered themes stay solid because their internal atoms
-      // have one dominant theme; only diffuse boundaries become water.
-      let isBorder = false;
-      if (topTheme !== null && secondScore > 0) {
-        const ratio = Math.sqrt(secondScore / topScore);
-        if (ratio > BORDER_SCORE_RATIO) isBorder = true;
-      }
-      const isLand = !inEdgeBand && !isBorder && topTheme !== null;
-      const themeKey = isLand ? topTheme : null;
-      const baseColor = themeKey
-        ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
-        : OCEAN_COLOR;
-      const delta = (rand() - 0.5) * 2;
-      const color = jitterHex(baseColor, themeKey ? delta : delta * 0.25);
-      const path =
-        polygon
-          .map((p, idx) =>
-            idx === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`
-          )
-          .join(" ") + "Z";
-      out.push({ d: path, color });
-    }
-    return out;
-  }, [atoms, placed]);
-
   const shownId = pinnedId ?? hoveredId;
-  const shownPlaced = shownId ? placed.find((p) => p.h.id === shownId) : null;
+  const shownPlaced = shownId ? placedSnapped.find((p) => p.h.id === shownId) : null;
   const popoverVariant: "full" | "name" =
     pinnedId === shownId ? "full" : hoverMode === "name" ? "name" : "full";
 
@@ -665,7 +761,7 @@ export function ClusterMap({
             />
           </filter>
         </defs>
-        {cells.map((c, i) => (
+        {cellPaths.map((c, i) => (
           <path
             key={i}
             d={c.d}
@@ -682,7 +778,7 @@ export function ClusterMap({
           filter="url(#paper-grain)"
           pointerEvents="none"
         />
-        {placed.map((p) => (
+        {placedSnapped.map((p) => (
           <Figure
             key={p.h.id}
             placed={p}
