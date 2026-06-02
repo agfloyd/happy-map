@@ -164,18 +164,6 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
     };
   }, []);
 
-  // Lock body scroll while the fullscreen map is up — no trackpad two-finger
-  // swipe, no momentum scroll, no reveal of off-screen margin. Restored when
-  // we leave fullscreen.
-  useEffect(() => {
-    if (feedHidden) {
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
-    }
-  }, [feedHidden]);
 
   // Full-bleed mode: the map is the entire viewport, every control floats on
   // top of it. Title overlay top-left, theme/hover/show-feed cluster
@@ -183,7 +171,7 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
   // inside ClusterMap with breathing room from the corners).
   if (feedHidden) {
     return (
-      <main className="fixed inset-0 z-40">
+      <main className="fixed inset-0 z-40 overflow-hidden">
         <ClusterMap
           items={items}
           onSelect={handleSelect}
@@ -210,7 +198,16 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
                 "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
             }}
           >
-            text <span className="font-bold">join zoo-swam</span> to +1 415 523 8886
+            text <span className="font-bold">join zoo-swam</span> to{" "}
+            <a
+              href="https://wa.me/14155238886?text=join%20zoo-swam"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="pointer-events-auto underline decoration-white/60 underline-offset-2 hover:decoration-white"
+            >
+              +1 415 523 8886
+            </a>{" "}
+            on WhatsApp
           </p>
         </div>
         <div className="fixed top-5 right-6 z-50 flex items-center gap-2">
@@ -244,7 +241,16 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             className="mt-1 text-sm text-zinc-600 dark:text-zinc-400"
             style={{ fontFamily: "var(--font-fredoka)" }}
           >
-            text <span className="font-bold">join zoo-swam</span> to +1 415 523 8886
+            text <span className="font-bold">join zoo-swam</span> to{" "}
+            <a
+              href="https://wa.me/14155238886?text=join%20zoo-swam"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-zinc-400 dark:decoration-zinc-600 underline-offset-2 hover:decoration-zinc-700 dark:hover:decoration-zinc-300"
+            >
+              +1 415 523 8886
+            </a>{" "}
+            on WhatsApp
           </p>
         </header>
       </div>

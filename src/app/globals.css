@@ -20,12 +20,18 @@
   --font-sans: var(--font-nunito);
 }
 
+/* Kill horizontal scroll at both html and body level. Pixel rounding on
+   Retina + the SVG map can otherwise leave a sub-pixel of overflow that
+   a trackpad two-finger swipe exposes as scrollable margin. overscroll-
+   behavior-x: none also kills the rubber-band effect on Mac. */
+html, body {
+  overflow-x: hidden;
+  max-width: 100%;
+  overscroll-behavior-x: none;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-nunito), ui-rounded, "Segoe UI", system-ui, sans-serif;
-  /* Pixel-rounding on Retina + the SVG map can leave a tiny sub-pixel
-     overflow on the right edge; killing horizontal scroll on the body
-     prevents the trackpad two-finger swipe from revealing margin. */
-  overflow-x: hidden;
 }
