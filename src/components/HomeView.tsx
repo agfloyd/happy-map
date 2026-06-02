@@ -164,57 +164,94 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
     };
   }, []);
 
-  return (
-    <div
-      className={
-        feedHidden ? "" : "max-w-7xl mx-auto px-4 sm:px-6"
-      }
-    >
-      <div
-        className={`grid gap-4 lg:gap-6 ${
-          feedHidden ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_360px]"
-        }`}
-      >
-      <div className="min-w-0 relative">
+  // Full-bleed mode: the map is the entire viewport, every control floats on
+  // top of it. Title overlay top-left, theme/hover/show-feed cluster
+  // top-right, zoom controls bottom-left, compass bottom-right (positioned
+  // inside ClusterMap with breathing room from the corners).
+  if (feedHidden) {
+    return (
+      <main className="fixed inset-0 z-40">
         <ClusterMap
           items={items}
           onSelect={handleSelect}
           highlightedId={highlightedId}
           hoverMode={hoverMode}
-          fullBleed={feedHidden}
+          fullBleed
         />
-        {/* feed-toggle caret pinned to the top-right corner of the map so it
-            stays visible regardless of scroll position or feed state */}
-        <button
-          type="button"
-          onClick={() => setFeedHidden((v) => !v)}
-          aria-label={feedHidden ? "Show feed" : "Hide feed"}
-          title={feedHidden ? "Show feed" : "Hide feed"}
-          className="hidden lg:flex absolute top-3 right-3 h-8 w-8 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 z-30 backdrop-blur"
-        >
-          {feedHidden ? (
-            <ChevronLeft className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-        </button>
-        <div className="mt-3 flex justify-center items-center gap-2">
+        <div className="pointer-events-none absolute top-4 left-5 z-30 select-none">
+          <h1
+            className="text-2xl sm:text-3xl font-semibold tracking-tight text-white"
+            style={{
+              textShadow:
+                "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
+            }}
+          >
+            Happy Map
+          </h1>
+        </div>
+        <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
           <ThemeToggle />
           <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
+          <button
+            type="button"
+            onClick={() => setFeedHidden(false)}
+            aria-label="Show feed"
+            title="Show feed"
+            className="hidden lg:flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="w-full py-6 sm:py-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-6">
+        <header>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+            Happy Map
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            A collective map of small joys, growing one moment at a time.
+          </p>
+        </header>
+      </div>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="grid gap-4 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 relative">
+            <ClusterMap
+              items={items}
+              onSelect={handleSelect}
+              highlightedId={highlightedId}
+              hoverMode={hoverMode}
+            />
+            <button
+              type="button"
+              onClick={() => setFeedHidden(true)}
+              aria-label="Hide feed"
+              title="Hide feed"
+              className="hidden lg:flex absolute top-3 right-3 h-8 w-8 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 z-30 backdrop-blur"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <div className="mt-3 flex justify-center items-center gap-2">
+              <ThemeToggle />
+              <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
+            </div>
+          </div>
+          <aside className="space-y-4 min-w-0">
+            <HappinessForm />
+            <section>
+              <h2 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500 mb-2 px-1">
+                Recent moments
+              </h2>
+              <Feed items={items} highlightedId={highlightedId} />
+            </section>
+          </aside>
         </div>
       </div>
-      {!feedHidden && (
-        <aside className="space-y-4 min-w-0">
-          <HappinessForm />
-          <section>
-            <h2 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500 mb-2 px-1">
-              Recent moments
-            </h2>
-            <Feed items={items} highlightedId={highlightedId} />
-          </section>
-        </aside>
-      )}
-      </div>
-    </div>
+    </main>
   );
 }

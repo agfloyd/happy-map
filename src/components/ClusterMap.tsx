@@ -30,7 +30,10 @@ const MIN_DIFFERENT_NEIGHBOURS = 1;
 // theme — within this max displacement. Outliers beyond this stay put.
 const MAX_SNAP_DIST = 120;
 
-const MIN_ZOOM = 1;
+// Allow zooming below 1 so the continents can shrink into an infinite-feeling
+// sea. clampPan() centers the canvas inside the viewBox when z<1, and the SVG
+// background fills the area beyond the painted cells with ocean.
+const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 1.5;
 
@@ -131,6 +134,15 @@ function clamp(v: number, lo: number, hi: number) {
 }
 
 function clampPan(x: number, y: number, z: number) {
+  if (z < 1) {
+    // When zoomed out, the viewBox is bigger than the painted canvas. Center
+    // the canvas inside the viewBox so the continents stay in the middle of
+    // the screen with ocean spreading out symmetrically around them.
+    return {
+      x: (WIDTH - WIDTH / z) / 2,
+      y: (HEIGHT - HEIGHT / z) / 2,
+    };
+  }
   const maxX = WIDTH - WIDTH / z;
   const maxY = HEIGHT - HEIGHT / z;
   return {
@@ -871,20 +883,16 @@ export function ClusterMap({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full overflow-hidden ${
+      className={`relative overflow-hidden ${
         fullBleed
-          ? ""
-          : "rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          ? "w-full h-full"
+          : "w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
       }`}
-      style={
-        fullBleed
-          ? { height: "calc(100dvh - 9rem)" }
-          : { aspectRatio: `${WIDTH} / ${HEIGHT}` }
-      }
+      style={fullBleed ? undefined : { aspectRatio: `${WIDTH} / ${HEIGHT}` }}
     >
       <svg
         viewBox={viewBox}
-        preserveAspectRatio="xMidYMid slice"
+        preserveAspectRatio={fullBleed ? "xMidYMid meet" : "xMidYMid slice"}
         className="block w-full h-full select-none"
         style={{
           background: OCEAN_COLOR,
@@ -1029,8 +1037,31 @@ export function ClusterMap({
         </div>
       )}
 
-      {/* Zoom controls — bottom-left */}
-      <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 z-20">
+      {/* Zoom controls — bottom-left. In full-bleed mode the controls sit
+          inside the viewport itself, so we push them in from the corner so
+          they don't feel cramped against the screen edge. Reset is on TOP of
+          the column so it can never be clipped by the bottom edge — it stays
+          rendered (opacity-0) at z=1 so +/− don't shift when it appears. */}
+      <div
+        className={`absolute flex flex-col gap-1.5 z-20 ${
+          fullBleed ? "bottom-6 left-6" : "bottom-3 left-3"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={resetView}
+          aria-label="Reset view"
+          title="Reset view"
+          aria-hidden={Math.abs(zoom - 1) < 0.01}
+          tabIndex={Math.abs(zoom - 1) < 0.01 ? -1 : 0}
+          className={`h-7 px-2 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-[10px] font-medium text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur transition-opacity duration-200 ${
+            Math.abs(zoom - 1) < 0.01
+              ? "opacity-0 pointer-events-none"
+              : "opacity-100"
+          }`}
+        >
+          Reset
+        </button>
         <button
           type="button"
           onClick={() => zoomTo(zoom * ZOOM_STEP)}
@@ -1051,26 +1082,10 @@ export function ClusterMap({
         >
           <ChevronMinus />
         </button>
-        {/* Reset is always rendered so + and − never shift; fades when not needed */}
-        <button
-          type="button"
-          onClick={resetView}
-          aria-label="Reset view"
-          title="Reset view"
-          aria-hidden={zoom <= 1.01}
-          tabIndex={zoom <= 1.01 ? -1 : 0}
-          className={`h-7 px-2 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-[10px] font-medium text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur transition-opacity duration-200 ${
-            zoom <= 1.01
-              ? "opacity-0 pointer-events-none"
-              : "opacity-100"
-          }`}
-        >
-          Reset
-        </button>
       </div>
 
       {/* Compass — bottom-right */}
-      <Compass placed={placed} pan={pan} zoom={zoom} />
+      <Compass placed={placed} pan={pan} zoom={zoom} fullBleed={fullBleed} />
 
       {placed.length === 0 && (
         <p className="text-center text-xs text-zinc-500 dark:text-zinc-400 py-2 italic absolute bottom-0 inset-x-0 bg-white/70 dark:bg-zinc-900/70">
@@ -1085,10 +1100,12 @@ function Compass({
   placed,
   pan,
   zoom,
+  fullBleed = false,
 }: {
   placed: Placed[];
   pan: { x: number; y: number };
   zoom: number;
+  fullBleed?: boolean;
 }) {
   // localStorage-persisted collapse state. Null until we've read storage,
   // so we don't render a flash of the wrong state on first paint.
@@ -1111,6 +1128,8 @@ function Compass({
   }
   if (collapsed === null) return null;
 
+  const cornerOffset = fullBleed ? "bottom-6 right-6" : "bottom-3 right-3";
+
   if (collapsed) {
     return (
       <button
@@ -1118,7 +1137,7 @@ function Compass({
         onClick={toggle}
         aria-label="Show compass"
         title="Show compass"
-        className="absolute bottom-3 right-3 z-20 h-9 w-9 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center"
+        className={`absolute ${cornerOffset} z-20 h-9 w-9 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center`}
       >
         <CompassRose className="h-4 w-4" />
       </button>
@@ -1159,7 +1178,7 @@ function Compass({
 
   return (
     <div
-      className="pointer-events-none absolute bottom-3 right-3 z-20"
+      className={`pointer-events-none absolute ${cornerOffset} z-20`}
       style={{ width: W, height: H }}
     >
       <svg
