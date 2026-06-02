@@ -7,11 +7,10 @@ import type { Happiness } from "@/lib/types";
 const WIDTH = 600;
 const HEIGHT = 400;
 const ATOM_COUNT = 1500;
-// Padding beyond the canvas where we keep generating ocean atoms, so the
-// mottled-cell ocean look continues when the user zooms out past zoom=1.
-// Sized to cover the viewBox at MIN_ZOOM with a comfortable margin.
-const OUTER_PAD = 1000;
-const OUTER_ATOM_COUNT = 1200;
+// Waves are scattered in a band that hugs the canvas. Beyond the band, the
+// ocean is just flat blue (the SVG background).
+const WAVE_PAD = 320;
+const WAVE_COUNT = 110;
 // Per-figure influence radius for the land-claim score. Each figure
 // contributes (R − d)² to its theme's score at every atom inside R. The
 // theme with the highest summed score claims the atom. Bigger = larger
@@ -248,10 +247,19 @@ function PopoverCard({ h, variant }: { h: Happiness; variant: "full" | "name" })
   );
 }
 
+// Small joiner words stay lowercase in our title-case (unless they're the
+// first word). Gives us "Career and Work" instead of "Career And Work".
+const TITLE_CASE_LOWER = new Set(["and", "or", "of", "the", "a", "an", "to"]);
+
 function titleCase(s: string): string {
   return s
     .split(/\s+/)
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .map((w, i) => {
+      if (!w) return w;
+      const lower = w.toLowerCase();
+      if (i > 0 && TITLE_CASE_LOWER.has(lower)) return lower;
+      return w[0].toUpperCase() + w.slice(1).toLowerCase();
+    })
     .join(" ");
 }
 
@@ -369,42 +377,36 @@ export function ClusterMap({
   const atoms = useMemo(() => {
     const rand = mulberry32(12345);
     const pts: [number, number][] = [];
-    // Inner atoms — dense across the canvas. These are the only ones the
-    // continent algorithm considers (claim into themes).
     for (let i = 0; i < ATOM_COUNT; i++) {
       pts.push([rand() * WIDTH, rand() * HEIGHT]);
-    }
-    // Outer ocean atoms — sparser, spread across a padded annulus around
-    // the canvas. Voronoi cells over these atoms give the mottled-ocean
-    // look that the inner cells have, but extended into the area the user
-    // sees when zoomed out past zoom=1. The annulus is OUTER_PAD wide on
-    // each side of the canvas.
-    const minX = -OUTER_PAD;
-    const minY = -OUTER_PAD;
-    const fullW = WIDTH + 2 * OUTER_PAD;
-    const fullH = HEIGHT + 2 * OUTER_PAD;
-    for (let i = 0; i < OUTER_ATOM_COUNT; i++) {
-      let x: number;
-      let y: number;
-      do {
-        x = minX + rand() * fullW;
-        y = minY + rand() * fullH;
-      } while (x >= 0 && x <= WIDTH && y >= 0 && y <= HEIGHT);
-      pts.push([x, y]);
     }
     return pts;
   }, []);
 
+  // Wave squiggles scattered in a band around the canvas — purely
+  // decorative. Anchored in SVG coords so they stay locked to the map
+  // when the user pans/zooms.
+  const waves = useMemo(() => {
+    const rand = mulberry32(99999);
+    const out: { x: number; y: number; flip: boolean }[] = [];
+    for (let i = 0; i < WAVE_COUNT; i++) {
+      let x = 0;
+      let y = 0;
+      // Reject samples that land on the canvas — waves live in the ocean
+      // band only. Cap attempts so a bad seed can't loop forever.
+      for (let tries = 0; tries < 20; tries++) {
+        x = -WAVE_PAD + rand() * (WIDTH + 2 * WAVE_PAD);
+        y = -WAVE_PAD + rand() * (HEIGHT + 2 * WAVE_PAD);
+        if (x < 0 || x > WIDTH || y < 0 || y > HEIGHT) break;
+      }
+      out.push({ x, y, flip: rand() < 0.5 });
+    }
+    return out;
+  }, []);
+
   const { cellPaths, atomThemes } = useMemo(() => {
     const delaunay = Delaunay.from(atoms);
-    // Voronoi bounds extend by OUTER_PAD so the outer ocean atoms get
-    // actual polygon coverage (not zero-area cells clipped to the canvas).
-    const voronoi = delaunay.voronoi([
-      -OUTER_PAD,
-      -OUTER_PAD,
-      WIDTH + OUTER_PAD,
-      HEIGHT + OUTER_PAD,
-    ]);
+    const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
     const rand = mulberry32(54321);
     const REACH2 = REGION_REACH * REGION_REACH;
 
@@ -440,10 +442,6 @@ export function ClusterMap({
       ax > WIDTH - EDGE_OCEAN_BAND ||
       ay < EDGE_OCEAN_BAND ||
       ay > HEIGHT - EDGE_OCEAN_BAND;
-    // Atoms outside the canvas are always ocean — they form the extended
-    // ocean field the user sees when zoomed out.
-    const isOuterAtom = (ax: number, ay: number) =>
-      ax < 0 || ax > WIDTH || ay < 0 || ay > HEIGHT;
 
     // Seed each theme at the atom containing its most-central member (the
     // member closest to the theme centroid). Seeding at a member atom
@@ -568,17 +566,17 @@ export function ClusterMap({
     const themes: (string | null)[] = [];
     for (let i = 0; i < atoms.length; i++) {
       const polygon = voronoi.cellPolygon(i);
-      if (!polygon) {
-        themes.push(null);
-        continue;
-      }
-      const themeKey = finalThemes[i];
+      const themeKey = polygon ? finalThemes[i] : null;
       themes.push(themeKey);
-      const baseColor = themeKey
-        ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
-        : OCEAN_COLOR;
+      if (!polygon) continue;
+      // Ocean cells are no longer painted — the SVG background fills with
+      // a single flat OCEAN_COLOR so the area beyond the canvas (visible
+      // when zoomed out) reads as one continuous body of water rather
+      // than a polygonal lake.
+      if (themeKey === null) continue;
+      const baseColor = THEME_COLORS[themeKey] ?? OCEAN_COLOR;
       const delta = (rand() - 0.5) * 2;
-      const color = jitterHex(baseColor, themeKey ? delta : delta * 0.25);
+      const color = jitterHex(baseColor, delta);
       const path =
         polygon
           .map((p, idx) =>
@@ -679,7 +677,7 @@ export function ClusterMap({
       if (g.atomCount < MIN_ATOMS_FOR_LABEL) continue;
       raw.push({
         key: t,
-        label: t.toUpperCase(),
+        label: titleCase(t),
         x: g.sumX / g.atomCount,
         y: g.sumY / g.atomCount,
         count: g.figureCount,
@@ -971,13 +969,34 @@ export function ClusterMap({
           />
         ))}
         <rect
-          x={-OUTER_PAD}
-          y={-OUTER_PAD}
-          width={WIDTH + 2 * OUTER_PAD}
-          height={HEIGHT + 2 * OUTER_PAD}
+          x={0}
+          y={0}
+          width={WIDTH}
+          height={HEIGHT}
           filter="url(#paper-grain)"
           pointerEvents="none"
         />
+        {/* Wave squiggles scattered through the ocean band around the
+            canvas — purely decorative, fade beyond WAVE_PAD into the flat
+            blue. Rendered after the cells so they sit on top of the ocean. */}
+        <g
+          stroke="rgba(255,255,255,0.55)"
+          strokeWidth={0.6}
+          strokeLinecap="round"
+          fill="none"
+          pointerEvents="none"
+        >
+          {waves.map((w, i) => (
+            <path
+              key={i}
+              d={
+                w.flip
+                  ? `M ${w.x},${w.y} q 2,1.6 4,0 t 4,0`
+                  : `M ${w.x},${w.y} q 2,-1.6 4,0 t 4,0`
+              }
+            />
+          ))}
+        </g>
         {placedSnapped.map((p) => (
           <Figure
             key={p.h.id}
@@ -1011,7 +1030,7 @@ export function ClusterMap({
             return (
               <div
                 key={l.key}
-                className="absolute -translate-x-1/2 -translate-y-1/2 text-[15px] sm:text-[18px] tracking-wide uppercase"
+                className="absolute -translate-x-1/2 -translate-y-1/2 text-[15px] sm:text-[18px] font-semibold tracking-wide"
                 style={{
                   left: `${xPct}%`,
                   top: `${yPct}%`,
@@ -1082,8 +1101,10 @@ export function ClusterMap({
           the column so it can never be clipped by the bottom edge — it stays
           rendered (opacity-0) at z=1 so +/− don't shift when it appears. */}
       <div
-        className={`absolute flex flex-col gap-1.5 z-20 ${
-          fullBleed ? "bottom-8 left-8" : "bottom-3 left-3"
+        className={`flex flex-col gap-1.5 ${
+          fullBleed
+            ? "fixed bottom-8 left-8 z-50"
+            : "absolute bottom-3 left-3 z-20"
         }`}
       >
         <button
@@ -1167,7 +1188,12 @@ function Compass({
   }
   if (collapsed === null) return null;
 
-  const cornerOffset = fullBleed ? "bottom-8 right-8" : "bottom-3 right-3";
+  // In full-bleed mode the compass anchors directly to the viewport (fixed)
+  // so it never shifts when the map content reflows. In normal mode it sits
+  // inside the rounded map container (absolute).
+  const positionClasses = fullBleed
+    ? "fixed bottom-8 right-8 z-50"
+    : "absolute bottom-3 right-3 z-20";
 
   if (collapsed) {
     return (
@@ -1176,7 +1202,7 @@ function Compass({
         onClick={toggle}
         aria-label="Show compass"
         title="Show compass"
-        className={`absolute ${cornerOffset} z-20 h-9 w-9 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center`}
+        className={`${positionClasses} h-9 w-9 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center`}
       >
         <CompassRose className="h-4 w-4" />
       </button>
@@ -1217,7 +1243,7 @@ function Compass({
 
   return (
     <div
-      className={`pointer-events-none absolute ${cornerOffset} z-20`}
+      className={`pointer-events-none ${positionClasses}`}
       style={{ width: W, height: H }}
     >
       <svg
