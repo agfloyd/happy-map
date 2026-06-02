@@ -7,6 +7,11 @@ import type { Happiness } from "@/lib/types";
 const WIDTH = 600;
 const HEIGHT = 400;
 const ATOM_COUNT = 1500;
+// Padding beyond the canvas where we keep generating ocean atoms, so the
+// mottled-cell ocean look continues when the user zooms out past zoom=1.
+// Sized to cover the viewBox at MIN_ZOOM with a comfortable margin.
+const OUTER_PAD = 1000;
+const OUTER_ATOM_COUNT = 1200;
 // Per-figure influence radius for the land-claim score. Each figure
 // contributes (R − d)² to its theme's score at every atom inside R. The
 // theme with the highest summed score claims the atom. Bigger = larger
@@ -31,9 +36,10 @@ const MIN_DIFFERENT_NEIGHBOURS = 1;
 const MAX_SNAP_DIST = 120;
 
 // Allow zooming below 1 so the continents can shrink into an infinite-feeling
-// sea. clampPan() centers the canvas inside the viewBox when z<1, and the SVG
-// background fills the area beyond the painted cells with ocean.
-const MIN_ZOOM = 0.4;
+// sea. clampPan() centers the canvas inside the viewBox when z<1, and the
+// outer Voronoi atoms fill the area beyond the painted continents with the
+// same mottled-ocean look as the inner cells.
+const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 1.5;
 
@@ -363,15 +369,42 @@ export function ClusterMap({
   const atoms = useMemo(() => {
     const rand = mulberry32(12345);
     const pts: [number, number][] = [];
+    // Inner atoms — dense across the canvas. These are the only ones the
+    // continent algorithm considers (claim into themes).
     for (let i = 0; i < ATOM_COUNT; i++) {
       pts.push([rand() * WIDTH, rand() * HEIGHT]);
+    }
+    // Outer ocean atoms — sparser, spread across a padded annulus around
+    // the canvas. Voronoi cells over these atoms give the mottled-ocean
+    // look that the inner cells have, but extended into the area the user
+    // sees when zoomed out past zoom=1. The annulus is OUTER_PAD wide on
+    // each side of the canvas.
+    const minX = -OUTER_PAD;
+    const minY = -OUTER_PAD;
+    const fullW = WIDTH + 2 * OUTER_PAD;
+    const fullH = HEIGHT + 2 * OUTER_PAD;
+    for (let i = 0; i < OUTER_ATOM_COUNT; i++) {
+      let x: number;
+      let y: number;
+      do {
+        x = minX + rand() * fullW;
+        y = minY + rand() * fullH;
+      } while (x >= 0 && x <= WIDTH && y >= 0 && y <= HEIGHT);
+      pts.push([x, y]);
     }
     return pts;
   }, []);
 
   const { cellPaths, atomThemes } = useMemo(() => {
     const delaunay = Delaunay.from(atoms);
-    const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
+    // Voronoi bounds extend by OUTER_PAD so the outer ocean atoms get
+    // actual polygon coverage (not zero-area cells clipped to the canvas).
+    const voronoi = delaunay.voronoi([
+      -OUTER_PAD,
+      -OUTER_PAD,
+      WIDTH + OUTER_PAD,
+      HEIGHT + OUTER_PAD,
+    ]);
     const rand = mulberry32(54321);
     const REACH2 = REGION_REACH * REGION_REACH;
 
@@ -407,6 +440,10 @@ export function ClusterMap({
       ax > WIDTH - EDGE_OCEAN_BAND ||
       ay < EDGE_OCEAN_BAND ||
       ay > HEIGHT - EDGE_OCEAN_BAND;
+    // Atoms outside the canvas are always ocean — they form the extended
+    // ocean field the user sees when zoomed out.
+    const isOuterAtom = (ax: number, ay: number) =>
+      ax < 0 || ax > WIDTH || ay < 0 || ay > HEIGHT;
 
     // Seed each theme at the atom containing its most-central member (the
     // member closest to the theme centroid). Seeding at a member atom
@@ -934,10 +971,10 @@ export function ClusterMap({
           />
         ))}
         <rect
-          x={0}
-          y={0}
-          width={WIDTH}
-          height={HEIGHT}
+          x={-OUTER_PAD}
+          y={-OUTER_PAD}
+          width={WIDTH + 2 * OUTER_PAD}
+          height={HEIGHT + 2 * OUTER_PAD}
           filter="url(#paper-grain)"
           pointerEvents="none"
         />
@@ -980,7 +1017,7 @@ export function ClusterMap({
                   top: `${yPct}%`,
                   color: CONTINENT_LABEL_COLOR,
                   opacity: continentOpacity,
-                  fontFamily: "var(--font-chewy)",
+                  fontFamily: "var(--font-fredoka)",
                   textShadow:
                     "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
                   transition: "opacity 200ms",
@@ -1008,7 +1045,7 @@ export function ClusterMap({
                   top: `${yPct}%`,
                   color: SUBTHEME_LABEL_COLOR,
                   opacity: subthemeOpacity,
-                  fontFamily: "var(--font-chewy)",
+                  fontFamily: "var(--font-fredoka)",
                   textShadow:
                     "0 1px 2px rgba(0,0,0,0.8), -1px -1px 0 rgba(40,30,0,0.7), 1px -1px 0 rgba(40,30,0,0.7), -1px 1px 0 rgba(40,30,0,0.7), 1px 1px 0 rgba(40,30,0,0.7)",
                   transition: "opacity 200ms",
@@ -1046,7 +1083,7 @@ export function ClusterMap({
           rendered (opacity-0) at z=1 so +/− don't shift when it appears. */}
       <div
         className={`absolute flex flex-col gap-1.5 z-20 ${
-          fullBleed ? "bottom-6 left-6" : "bottom-3 left-3"
+          fullBleed ? "bottom-8 left-8" : "bottom-3 left-3"
         }`}
       >
         <button
@@ -1130,7 +1167,7 @@ function Compass({
   }
   if (collapsed === null) return null;
 
-  const cornerOffset = fullBleed ? "bottom-6 right-6" : "bottom-3 right-3";
+  const cornerOffset = fullBleed ? "bottom-8 right-8" : "bottom-3 right-3";
 
   if (collapsed) {
     return (

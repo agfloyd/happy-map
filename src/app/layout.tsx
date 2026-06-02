@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Nunito, Chewy } from "next/font/google";
+import { Nunito, Fredoka } from "next/font/google";
 import "./globals.css";
 
 const nunito = Nunito({
@@ -8,12 +8,13 @@ const nunito = Nunito({
   weight: ["400", "500", "600", "700", "800"],
 });
 
-// Whimsical display font used on the map (title, continent labels,
-// subtheme labels). Nunito stays the body font for everything else.
-const chewy = Chewy({
-  variable: "--font-chewy",
+// Display font used on the map (title, continent labels, subtheme
+// labels) — rounded geometric sans, gives the map a friendlier feel
+// than the body sans. Nunito stays the body font for everything else.
+const fredoka = Fredoka({
+  variable: "--font-fredoka",
   subsets: ["latin"],
-  weight: ["400"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -34,7 +35,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${nunito.variable} ${chewy.variable} h-full antialiased`}
+      className={`${nunito.variable} ${fredoka.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>

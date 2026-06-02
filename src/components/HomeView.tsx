@@ -178,11 +178,11 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           hoverMode={hoverMode}
           fullBleed
         />
-        <div className="pointer-events-none absolute top-4 left-5 z-30 select-none">
+        <div className="pointer-events-none absolute top-5 left-6 z-30 select-none">
           <h1
             className="text-3xl sm:text-4xl tracking-wide text-white"
             style={{
-              fontFamily: "var(--font-chewy)",
+              fontFamily: "var(--font-fredoka)",
               textShadow:
                 "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
             }}
@@ -190,7 +190,7 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             Happy Map
           </h1>
         </div>
-        <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
+        <div className="absolute top-5 right-6 z-30 flex items-center gap-2">
           <ThemeToggle />
           <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
           <button
@@ -213,7 +213,7 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
         <header>
           <h1
             className="text-3xl sm:text-4xl tracking-wide"
-            style={{ fontFamily: "var(--font-chewy)" }}
+            style={{ fontFamily: "var(--font-fredoka)" }}
           >
             Happy Map
           </h1>
