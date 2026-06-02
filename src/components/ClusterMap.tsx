@@ -24,7 +24,7 @@ const EDGE_OCEAN_BAND = 28;
 // MIN_DIFFERENT_NEIGHBOURS of its Voronoi neighbours are claimed by some
 // OTHER theme. Higher = continents touch more directly with less water;
 // lower = wider water strips between continents.
-const MIN_DIFFERENT_NEIGHBOURS = 2;
+const MIN_DIFFERENT_NEIGHBOURS = 1;
 // When a figure's raw (agency, time) position lands inside another theme's
 // continent (or on a waterway), snap it to the nearest atom of its OWN
 // theme — within this max displacement. Outliers beyond this stay put.
@@ -586,10 +586,10 @@ export function ClusterMap({
       ensure(p.h.theme as string).figureCount++;
     }
     const raw: { key: string; label: string; x: number; y: number; count: number }[] = [];
-    // Every theme with figures should be labeled — nearest-figure Voronoi
-    // guarantees each one some land. Still skip themes whose continent is
-    // so small that a label would be larger than the land it sits on.
-    const MIN_ATOMS_FOR_LABEL = 5;
+    // Every theme with figures should be labelled — region-growing
+    // guarantees each one some land. Threshold is just a floor so a single
+    // stranded atom doesn't get a giant label on a tiny coloured speck.
+    const MIN_ATOMS_FOR_LABEL = 3;
     for (const [t, g] of groups) {
       if (g.atomCount < MIN_ATOMS_FOR_LABEL) continue;
       raw.push({
