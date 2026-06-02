@@ -11,22 +11,24 @@ const ATOM_COUNT = 1500;
 // contributes (R − d)² to its theme's score at every atom inside R. The
 // theme with the highest summed score claims the atom. Bigger = larger
 // continents that bridge across loosely-packed members.
-// Max distance from an atom to its claimed figure. Beyond this, the atom
-// is ocean. Sets the overall size of each figure's Voronoi-style cell.
-const LAND_R = 110;
+// Max distance from an atom to any of its claimed theme's members. Beyond
+// this, no theme can claim the atom — it becomes ocean. Sets the overall
+// reach of each continent past its figure cluster.
+const REGION_REACH = 95;
 const FIGURE_HEIGHT = 14;
 const HIT_RADIUS = 14;
 const MARGIN_X = 60;
 const MARGIN_Y = 48;
 const EDGE_OCEAN_BAND = 28;
-// An atom becomes a "border" — forced to ocean — when the nearest figure
-// and the second-nearest figure are from DIFFERENT themes AND their
-// distances are within this linear ratio. Higher = narrower waterways.
-const BORDER_LINEAR_RATIO = 0.86;
+// Waterway pass: an atom claimed by theme T becomes ocean if at least
+// MIN_DIFFERENT_NEIGHBOURS of its Voronoi neighbours are claimed by some
+// OTHER theme. Higher = continents touch more directly with less water;
+// lower = wider water strips between continents.
+const MIN_DIFFERENT_NEIGHBOURS = 2;
 // When a figure's raw (agency, time) position lands inside another theme's
 // continent (or on a waterway), snap it to the nearest atom of its OWN
 // theme — within this max displacement. Outliers beyond this stay put.
-const MAX_SNAP_DIST = 70;
+const MAX_SNAP_DIST = 120;
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -323,7 +325,160 @@ export function ClusterMap({
     const delaunay = Delaunay.from(atoms);
     const voronoi = delaunay.voronoi([0, 0, WIDTH, HEIGHT]);
     const rand = mulberry32(54321);
-    const LAND_R2 = LAND_R * LAND_R;
+    const REACH2 = REGION_REACH * REGION_REACH;
+
+    // Group members by theme.
+    const themeMembers = new Map<string, Placed[]>();
+    for (const p of placed) {
+      const t = p.h.theme as string;
+      if (!themeMembers.has(t)) themeMembers.set(t, []);
+      themeMembers.get(t)!.push(p);
+    }
+    const themeKeys = Array.from(themeMembers.keys()).sort();
+
+    // For each member, find the atom it sits inside (nearest atom). Used to
+    // check whether a member has been "reached" by its theme's region.
+    const memberAtomIdx = new Map<string, number>();
+    for (const p of placed) {
+      let bestIdx = 0;
+      let bestD2 = Infinity;
+      for (let i = 0; i < atoms.length; i++) {
+        const dx = atoms[i][0] - p.x;
+        const dy = atoms[i][1] - p.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestIdx = i;
+        }
+      }
+      memberAtomIdx.set(p.h.id, bestIdx);
+    }
+
+    const inEdgeBand = (ax: number, ay: number) =>
+      ax < EDGE_OCEAN_BAND ||
+      ax > WIDTH - EDGE_OCEAN_BAND ||
+      ay < EDGE_OCEAN_BAND ||
+      ay > HEIGHT - EDGE_OCEAN_BAND;
+
+    // Seed each theme at the atom containing its most-central member (the
+    // member closest to the theme centroid). Seeding at a member atom
+    // guarantees the seed is within REGION_REACH of itself, even when the
+    // theme's members are spread across the map.
+    const atomTheme: (string | null)[] = new Array(atoms.length).fill(null);
+    const frontiers = new Map<string, Set<number>>();
+    for (const t of themeKeys) frontiers.set(t, new Set<number>());
+
+    for (const t of themeKeys) {
+      const members = themeMembers.get(t)!;
+      const cx = members.reduce((s, m) => s + m.x, 0) / members.length;
+      const cy = members.reduce((s, m) => s + m.y, 0) / members.length;
+      let centralMember = members[0];
+      let bestMemberD2 = Infinity;
+      for (const m of members) {
+        const dx = m.x - cx;
+        const dy = m.y - cy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestMemberD2) {
+          bestMemberD2 = d2;
+          centralMember = m;
+        }
+      }
+      const seedIdx = memberAtomIdx.get(centralMember.h.id)!;
+      atomTheme[seedIdx] = t;
+      for (const n of voronoi.neighbors(seedIdx)) {
+        if (atomTheme[n] === null && !inEdgeBand(atoms[n][0], atoms[n][1])) {
+          frontiers.get(t)!.add(n);
+        }
+      }
+    }
+
+    // Region-growing main loop with PROPORTIONAL scheduling. At each step
+    // we pick the theme whose atoms-per-member ratio is currently smallest
+    // (i.e. the theme that's most behind in growth relative to its size),
+    // then expand IT by one atom — claiming the frontier atom closest to
+    // any of its members. This stops tightly-clustered or spread-out big
+    // themes from monopolising the grow phase and starving the small ones.
+    const claimedCount = new Map<string, number>();
+    for (const t of themeKeys) claimedCount.set(t, 1); // each seed atom
+
+    while (true) {
+      // Pick the theme that's most behind on growth.
+      let scheduledTheme: string | null = null;
+      let lowestRatio = Infinity;
+      for (const t of themeKeys) {
+        if (frontiers.get(t)!.size === 0) continue;
+        const ratio = claimedCount.get(t)! / themeMembers.get(t)!.length;
+        if (ratio < lowestRatio) {
+          lowestRatio = ratio;
+          scheduledTheme = t;
+        }
+      }
+      if (scheduledTheme === null) break;
+
+      // Pick the best frontier atom for this theme (closest to any member,
+      // skipping atoms beyond REGION_REACH).
+      const members = themeMembers.get(scheduledTheme)!;
+      let bestAtom = -1;
+      let bestNearestD2 = Infinity;
+      for (const candidate of frontiers.get(scheduledTheme)!) {
+        if (atomTheme[candidate] !== null) continue;
+        const [ax, ay] = atoms[candidate];
+        let nearestD2 = Infinity;
+        for (const m of members) {
+          const dx = m.x - ax;
+          const dy = m.y - ay;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < nearestD2) nearestD2 = d2;
+        }
+        if (nearestD2 > REACH2) continue;
+        if (nearestD2 < bestNearestD2) {
+          bestNearestD2 = nearestD2;
+          bestAtom = candidate;
+        }
+      }
+      if (bestAtom < 0) {
+        // This theme has no claimable atoms in its frontier — drop its
+        // frontier so the scheduler moves on. (Frontier atoms that are out
+        // of reach will never become claimable for this theme.)
+        frontiers.get(scheduledTheme)!.clear();
+        continue;
+      }
+
+      atomTheme[bestAtom] = scheduledTheme;
+      claimedCount.set(scheduledTheme, claimedCount.get(scheduledTheme)! + 1);
+      for (const t of themeKeys) frontiers.get(t)!.delete(bestAtom);
+      for (const n of voronoi.neighbors(bestAtom)) {
+        if (
+          atomTheme[n] === null &&
+          !inEdgeBand(atoms[n][0], atoms[n][1])
+        ) {
+          frontiers.get(scheduledTheme)!.add(n);
+        }
+      }
+    }
+
+    // Waterway pass: any atom whose Voronoi cell touches at least
+    // MIN_DIFFERENT_NEIGHBOURS cells of a different theme becomes ocean.
+    // This carves the blue strips between continents that make Alvin's map
+    // legible at a glance. Members are protected — the atom holding a
+    // figure can't be turned into water, so figures never end up under
+    // the boundary stripe.
+    const memberAtomSet = new Set<number>(memberAtomIdx.values());
+    const finalThemes: (string | null)[] = atomTheme.slice();
+    for (let i = 0; i < atoms.length; i++) {
+      const t = atomTheme[i];
+      if (t === null) continue;
+      if (memberAtomSet.has(i)) continue;
+      let differentCount = 0;
+      for (const n of voronoi.neighbors(i)) {
+        const tn = atomTheme[n];
+        if (tn !== null && tn !== t) differentCount++;
+      }
+      if (differentCount >= MIN_DIFFERENT_NEIGHBOURS) {
+        finalThemes[i] = null;
+      }
+    }
+
     const paths: { d: string; color: string }[] = [];
     const themes: (string | null)[] = [];
     for (let i = 0; i < atoms.length; i++) {
@@ -332,56 +487,7 @@ export function ClusterMap({
         themes.push(null);
         continue;
       }
-      const [ax, ay] = atoms[i];
-      // Nearest-figure rule: each atom belongs to the theme of the figure
-      // closest to it. This is essentially a Voronoi at the figure level —
-      // every figure gets its own cell, and adjacent cells of the same
-      // theme merge visually into a single continent. So every theme is
-      // GUARANTEED territory proportional to its member count, and every
-      // figure sits inside its own theme's land.
-      let nearestIdx = -1;
-      let nearestD2 = Infinity;
-      let secondIdx = -1;
-      let secondD2 = Infinity;
-      for (let j = 0; j < placed.length; j++) {
-        const dx = placed[j].x - ax;
-        const dy = placed[j].y - ay;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < nearestD2) {
-          secondD2 = nearestD2;
-          secondIdx = nearestIdx;
-          nearestD2 = d2;
-          nearestIdx = j;
-        } else if (d2 < secondD2) {
-          secondD2 = d2;
-          secondIdx = j;
-        }
-      }
-      const inEdgeBand =
-        ax < EDGE_OCEAN_BAND ||
-        ax > WIDTH - EDGE_OCEAN_BAND ||
-        ay < EDGE_OCEAN_BAND ||
-        ay > HEIGHT - EDGE_OCEAN_BAND;
-      // Waterway between cells of DIFFERENT themes: when the two nearest
-      // figures are close in distance and from different themes, force
-      // ocean. Same-theme neighbours still merge into one continent.
-      let isBorder = false;
-      if (
-        nearestIdx >= 0 &&
-        secondIdx >= 0 &&
-        placed[nearestIdx].h.theme !== placed[secondIdx].h.theme
-      ) {
-        const ratio = Math.sqrt(nearestD2 / Math.max(secondD2, 1e-6));
-        if (ratio > BORDER_LINEAR_RATIO) isBorder = true;
-      }
-      const isLand =
-        !inEdgeBand &&
-        !isBorder &&
-        nearestIdx >= 0 &&
-        nearestD2 < LAND_R2;
-      const themeKey = isLand
-        ? (placed[nearestIdx].h.theme as string)
-        : null;
+      const themeKey = finalThemes[i];
       themes.push(themeKey);
       const baseColor = themeKey
         ? THEME_COLORS[themeKey] ?? OCEAN_COLOR
@@ -505,6 +611,11 @@ export function ClusterMap({
     const MIN_Y = 22;
     const Y_MIN = 16;
     const Y_MAX = HEIGHT - 16;
+    // Keep labels horizontally inside the map; a label centroid that falls
+    // right at the edge would clip half the text. ~90 SVG units covers the
+    // half-width of the widest label ("MATERIAL ACQUISITION" etc.) at the
+    // map's natural render scale.
+    const X_PAD = 90;
     const sorted = [...raw].sort(
       (a, b) => b.count - a.count || a.key.localeCompare(b.key)
     );
@@ -514,7 +625,7 @@ export function ClusterMap({
       for (let k = 1; k <= 6; k++) {
         candidates.push(l.y + k * MIN_Y, l.y - k * MIN_Y);
       }
-      const x = l.x;
+      const x = clamp(l.x, X_PAD, WIDTH - X_PAD);
       let placedY: number | null = null;
       for (const cy of candidates) {
         if (cy < Y_MIN || cy > Y_MAX) continue;
