@@ -180,8 +180,9 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
         />
         <div className="pointer-events-none absolute top-4 left-5 z-30 select-none">
           <h1
-            className="text-2xl sm:text-3xl font-semibold tracking-tight text-white"
+            className="text-3xl sm:text-4xl tracking-wide text-white"
             style={{
+              fontFamily: "var(--font-chewy)",
               textShadow:
                 "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
             }}
@@ -197,7 +198,7 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             onClick={() => setFeedHidden(false)}
             aria-label="Show feed"
             title="Show feed"
-            className="hidden lg:flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -210,7 +211,10 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
     <main className="w-full py-6 sm:py-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-6">
         <header>
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+          <h1
+            className="text-3xl sm:text-4xl tracking-wide"
+            style={{ fontFamily: "var(--font-chewy)" }}
+          >
             Happy Map
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">

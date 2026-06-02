@@ -1,11 +1,20 @@
 import type { Metadata } from "next";
-import { Nunito } from "next/font/google";
+import { Nunito, Chewy } from "next/font/google";
 import "./globals.css";
 
 const nunito = Nunito({
   variable: "--font-nunito",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
+});
+
+// Whimsical display font used on the map (title, continent labels,
+// subtheme labels). Nunito stays the body font for everything else.
+const chewy = Chewy({
+  variable: "--font-chewy",
+  subsets: ["latin"],
+  weight: ["400"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -25,7 +34,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${nunito.variable} h-full antialiased`}
+      className={`${nunito.variable} ${chewy.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>

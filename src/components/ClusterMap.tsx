@@ -974,12 +974,13 @@ export function ClusterMap({
             return (
               <div
                 key={l.key}
-                className="absolute -translate-x-1/2 -translate-y-1/2 text-[13px] sm:text-[15px] font-extrabold tracking-wider uppercase"
+                className="absolute -translate-x-1/2 -translate-y-1/2 text-[15px] sm:text-[18px] tracking-wide uppercase"
                 style={{
                   left: `${xPct}%`,
                   top: `${yPct}%`,
                   color: CONTINENT_LABEL_COLOR,
                   opacity: continentOpacity,
+                  fontFamily: "var(--font-chewy)",
                   textShadow:
                     "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
                   transition: "opacity 200ms",
@@ -1001,12 +1002,13 @@ export function ClusterMap({
             return (
               <div
                 key={l.key}
-                className="absolute -translate-x-1/2 -translate-y-1/2 text-[11px] sm:text-[12px] font-semibold italic"
+                className="absolute -translate-x-1/2 -translate-y-1/2 text-[12px] sm:text-[14px]"
                 style={{
                   left: `${xPct}%`,
                   top: `${yPct}%`,
                   color: SUBTHEME_LABEL_COLOR,
                   opacity: subthemeOpacity,
+                  fontFamily: "var(--font-chewy)",
                   textShadow:
                     "0 1px 2px rgba(0,0,0,0.8), -1px -1px 0 rgba(40,30,0,0.7), 1px -1px 0 rgba(40,30,0,0.7), -1px 1px 0 rgba(40,30,0,0.7), 1px 1px 0 rgba(40,30,0,0.7)",
                   transition: "opacity 200ms",
