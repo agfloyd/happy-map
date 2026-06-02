@@ -18,15 +18,17 @@ export default async function Home() {
   const initial = (data ?? []) as Happiness[];
 
   return (
-    <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
-      <header className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-          Happy Map
-        </h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          A collective map of small joys, growing one moment at a time.
-        </p>
-      </header>
+    <main className="w-full py-6 sm:py-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <header className="mb-6">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+            Happy Map
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            A collective map of small joys, growing one moment at a time.
+          </p>
+        </header>
+      </div>
 
       <HomeView initial={initial} />
     </main>

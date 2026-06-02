@@ -166,16 +166,22 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
 
   return (
     <div
-      className={`grid gap-4 lg:gap-6 ${
-        feedHidden ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_360px]"
-      }`}
+      className={
+        feedHidden ? "" : "max-w-7xl mx-auto px-4 sm:px-6"
+      }
     >
+      <div
+        className={`grid gap-4 lg:gap-6 ${
+          feedHidden ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_360px]"
+        }`}
+      >
       <div className="min-w-0 relative">
         <ClusterMap
           items={items}
           onSelect={handleSelect}
           highlightedId={highlightedId}
           hoverMode={hoverMode}
+          fullBleed={feedHidden}
         />
         {/* feed-toggle caret pinned to the top-right corner of the map so it
             stays visible regardless of scroll position or feed state */}
@@ -208,6 +214,7 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           </section>
         </aside>
       )}
+      </div>
     </div>
   );
 }

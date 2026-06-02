@@ -254,16 +254,52 @@ function ChevronMinus() {
   );
 }
 
+function ChevronDownSmall({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function CompassRose({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 4 L14 12 L12 20 L10 12 Z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function ClusterMap({
   items,
   onSelect,
   highlightedId,
   hoverMode = "full",
+  fullBleed = false,
 }: {
   items: Happiness[];
   onSelect?: (id: string) => void;
   highlightedId?: string | null;
   hoverMode?: HoverMode;
+  fullBleed?: boolean;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
@@ -835,8 +871,16 @@ export function ClusterMap({
   return (
     <div
       ref={containerRef}
-      className="relative w-full rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-sm"
-      style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
+      className={`relative w-full overflow-hidden ${
+        fullBleed
+          ? ""
+          : "rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+      }`}
+      style={
+        fullBleed
+          ? { height: "calc(100dvh - 9rem)" }
+          : { aspectRatio: `${WIDTH} / ${HEIGHT}` }
+      }
     >
       <svg
         viewBox={viewBox}
@@ -1046,6 +1090,41 @@ function Compass({
   pan: { x: number; y: number };
   zoom: number;
 }) {
+  // localStorage-persisted collapse state. Null until we've read storage,
+  // so we don't render a flash of the wrong state on first paint.
+  const [collapsed, setCollapsed] = useState<boolean | null>(null);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem("compass-collapsed") === "1");
+    } catch {
+      setCollapsed(false);
+    }
+  }, []);
+  function toggle() {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem("compass-collapsed", next ? "1" : "0");
+      } catch {}
+      return next;
+    });
+  }
+  if (collapsed === null) return null;
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label="Show compass"
+        title="Show compass"
+        className="absolute bottom-3 right-3 z-20 h-9 w-9 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 text-zinc-700 dark:text-zinc-200 shadow-md hover:bg-white dark:hover:bg-zinc-800 backdrop-blur flex items-center justify-center"
+      >
+        <CompassRose className="h-4 w-4" />
+      </button>
+    );
+  }
+
   // Compass is a square — it represents the conceptual score space
   // (agency × time), which is square even though the rendered map is 3:2.
   const W = 138;
@@ -1132,6 +1211,16 @@ function Compass({
           rx={1}
         />
       </svg>
+      {/* collapse toggle — overrides the parent's pointer-events-none */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label="Hide compass"
+        title="Hide compass"
+        className="pointer-events-auto absolute -top-1 -right-1 z-10 h-5 w-5 rounded-full border border-zinc-300/80 dark:border-zinc-600/80 bg-white/95 dark:bg-zinc-900/95 text-zinc-600 dark:text-zinc-300 shadow hover:bg-white dark:hover:bg-zinc-800 flex items-center justify-center"
+      >
+        <ChevronDownSmall className="h-3 w-3" />
+      </button>
       {/* axis labels — HTML overlay so we get full Tailwind/font control */}
       <div
         className="absolute inset-0 text-[10px] font-bold tracking-wide text-zinc-800 dark:text-zinc-100 [text-shadow:0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95)] dark:[text-shadow:0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9),0_0_3px_rgba(0,0,0,0.9)]"
