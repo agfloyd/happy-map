@@ -24,4 +24,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-nunito), ui-rounded, "Segoe UI", system-ui, sans-serif;
+  /* Pixel-rounding on Retina + the SVG map can leave a tiny sub-pixel
+     overflow on the right edge; killing horizontal scroll on the body
+     prevents the trackpad two-finger swipe from revealing margin. */
+  overflow-x: hidden;
 }

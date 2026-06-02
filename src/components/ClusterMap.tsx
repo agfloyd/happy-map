@@ -968,11 +968,14 @@ export function ClusterMap({
             strokeWidth={0.4}
           />
         ))}
+        {/* Paper-grain noise overlay. Extends well beyond the canvas so the
+            infinite ocean visible at low zoom carries the same subtle
+            texture as the map proper. */}
         <rect
-          x={0}
-          y={0}
-          width={WIDTH}
-          height={HEIGHT}
+          x={-WIDTH * 2}
+          y={-HEIGHT * 2}
+          width={WIDTH * 5}
+          height={HEIGHT * 5}
           filter="url(#paper-grain)"
           pointerEvents="none"
         />

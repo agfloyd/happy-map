@@ -164,6 +164,19 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
     };
   }, []);
 
+  // Lock body scroll while the fullscreen map is up — no trackpad two-finger
+  // swipe, no momentum scroll, no reveal of off-screen margin. Restored when
+  // we leave fullscreen.
+  useEffect(() => {
+    if (feedHidden) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [feedHidden]);
+
   // Full-bleed mode: the map is the entire viewport, every control floats on
   // top of it. Title overlay top-left, theme/hover/show-feed cluster
   // top-right, zoom controls bottom-left, compass bottom-right (positioned
@@ -189,6 +202,16 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           >
             Happy Map
           </h1>
+          <p
+            className="mt-1 text-sm sm:text-base text-white"
+            style={{
+              fontFamily: "var(--font-fredoka)",
+              textShadow:
+                "0 1px 2px rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.55), 1px -1px 0 rgba(0,0,0,0.55), -1px 1px 0 rgba(0,0,0,0.55), 1px 1px 0 rgba(0,0,0,0.55)",
+            }}
+          >
+            text <span className="font-bold">join zoo-swam</span> to +1 415 523 8886
+          </p>
         </div>
         <div className="fixed top-5 right-6 z-50 flex items-center gap-2">
           <ThemeToggle />
@@ -217,8 +240,11 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           >
             Happy Map
           </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            A collective map of small joys, growing one moment at a time.
+          <p
+            className="mt-1 text-sm text-zinc-600 dark:text-zinc-400"
+            style={{ fontFamily: "var(--font-fredoka)" }}
+          >
+            text <span className="font-bold">join zoo-swam</span> to +1 415 523 8886
           </p>
         </header>
       </div>
