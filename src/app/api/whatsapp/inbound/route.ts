@@ -9,7 +9,10 @@ import {
   downloadTwilioMedia,
   extFromContentType,
   twiml,
+  sendWhatsApp,
 } from "@/lib/twilio";
+import { buildCelebrationPayload, renderCelebrationText } from "@/lib/celebration";
+import { announceToSignal } from "@/lib/signal";
 
 // Twilio's webhook is form-encoded; default body size limit is fine here.
 export const dynamic = "force-dynamic";
@@ -235,7 +238,29 @@ export async function POST(req: Request) {
       .from("happinesses")
       .update(tags)
       .eq("id", insertedId);
-    if (updateError) console.error("[whatsapp/tagging] update failed", updateError);
+    if (updateError) {
+      console.error("[whatsapp/tagging] update failed", updateError);
+      return;
+    }
+
+    // Now that the moment is tagged, build the celebration once and fan it out:
+    // announce to the Signal group, and reply to the contributor on WhatsApp.
+    const payload = await buildCelebrationPayload(insertedId);
+    if (!payload) return;
+
+    await announceToSignal(payload);
+
+    const whatsappFrom = process.env.TWILIO_WHATSAPP_FROM;
+    if (accountSid && authToken && whatsappFrom) {
+      await sendWhatsApp({
+        accountSid,
+        authToken,
+        from: whatsappFrom,
+        to: phone,
+        body: renderCelebrationText(payload),
+        mediaUrl: payload.figureImageUrl,
+      });
+    }
   });
 
   revalidatePath("/");

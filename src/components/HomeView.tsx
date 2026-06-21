@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Happiness } from "@/lib/types";
+import { ActivityTicker } from "@/components/ActivityTicker";
 import { ClusterMap, type HoverMode } from "@/components/ClusterMap";
 import { Feed } from "@/components/Feed";
 import { HappinessForm } from "@/components/HappinessForm";
@@ -119,6 +120,11 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
   const [feedHidden, setFeedHidden] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // `items` is kept newest-first (server query orders desc, realtime inserts
+  // unshift), so the head is the newest landing and length is the total.
+  const newest = items[0] ?? null;
+  const total = items.length;
+
   useEffect(() => {
     const channel = supabase
       .channel("happinesses-changes")
@@ -210,6 +216,9 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             on WhatsApp
           </p>
         </div>
+        <div className="pointer-events-none fixed top-5 left-1/2 z-50 -translate-x-1/2 px-4 max-w-[calc(100%-2rem)]">
+          <ActivityTicker count={total} newest={newest} />
+        </div>
         <div className="fixed top-5 right-6 z-50 flex items-center gap-2">
           <ThemeToggle />
           <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
@@ -253,6 +262,9 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             on WhatsApp
           </p>
         </header>
+        <div className="mt-4">
+          <ActivityTicker count={total} newest={newest} />
+        </div>
       </div>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="grid gap-4 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">

@@ -91,6 +91,65 @@ export function extFromContentType(ct: string): string {
 }
 
 /**
+ * Send an outbound WhatsApp message via the Twilio REST API. Used to follow up
+ * a submission with the richer "celebration" message once async tagging is done
+ * (the synchronous webhook reply can only ack — the theme isn't known yet).
+ *
+ * Sending is allowed template-free inside the 24h customer-service window, which
+ * a fresh inbound submission always opens. Returns true on success.
+ */
+export async function sendWhatsApp({
+  accountSid,
+  authToken,
+  from,
+  to,
+  body,
+  mediaUrl,
+}: {
+  accountSid: string;
+  authToken: string;
+  /** e.g. "whatsapp:+14155238886" (the Twilio WhatsApp sender) */
+  from: string;
+  /** bare E.164, e.g. "+14155551234"; "whatsapp:" prefix added if missing */
+  to: string;
+  body: string;
+  mediaUrl?: string;
+}): Promise<boolean> {
+  const toAddr = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  const fromAddr = from.startsWith("whatsapp:") ? from : `whatsapp:${from}`;
+  const basic = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+
+  const form = new URLSearchParams({ From: fromAddr, To: toAddr, Body: body });
+  if (mediaUrl) form.set("MediaUrl", mediaUrl);
+
+  try {
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${basic}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+      },
+    );
+    if (!res.ok) {
+      console.error(
+        "[twilio] outbound send failed",
+        res.status,
+        await res.text().catch(() => ""),
+      );
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[twilio] outbound send threw", err);
+    return false;
+  }
+}
+
+/**
  * Build a minimal TwiML response. Twilio expects valid XML.
  */
 export function twiml(replyText?: string): string {

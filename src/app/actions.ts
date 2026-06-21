@@ -7,6 +7,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { tagHappiness } from "@/lib/tagging";
 import { transcribeVoiceNote } from "@/lib/transcription";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
+import { buildCelebrationPayload } from "@/lib/celebration";
+import { announceToSignal } from "@/lib/signal";
 
 export type SubmitResult =
   | { ok: true }
@@ -132,8 +134,15 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
       .from("happinesses")
       .update(tags)
       .eq("id", insertedId);
-    if (updateError) console.error("[tagging] update failed", updateError);
-    else console.log("[tagging] saved", tags.theme, tags.subtheme);
+    if (updateError) {
+      console.error("[tagging] update failed", updateError);
+      return;
+    }
+    console.log("[tagging] saved", tags.theme, tags.subtheme);
+
+    // Celebrate the freshly-tagged moment to the Signal group.
+    const payload = await buildCelebrationPayload(insertedId);
+    if (payload) await announceToSignal(payload);
   });
 
   revalidatePath("/");
