@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Delaunay } from "d3-delaunay";
 import type { Happiness } from "@/lib/types";
+import { resolveAvatar } from "@/lib/avatars";
+import { loadPeepInner } from "@/lib/peep-cache";
+import { peepMeta } from "@/lib/peeps.generated";
 
 const WIDTH = 600;
 const HEIGHT = 400;
@@ -66,42 +69,10 @@ const THEME_COLORS: Record<string, string> = {
 
 const OCEAN_COLOR = "#94c1de";
 
-const PERSON_COLORS = [
-  "#2d3748",
-  "#7c2d2d",
-  "#1e3a8a",
-  "#3f6212",
-  "#581c87",
-  "#7c2d12",
-  "#134e4a",
-  "#3f3f46",
-  "#831843",
-  "#1e4258",
-  "#854d0e",
-  "#4c1d95",
-];
-const ANONYMOUS_COLOR = "#52525b";
-
 const CONTINENT_LABEL_COLOR = "#ffffff";
 const SUBTHEME_LABEL_COLOR = "#fde68a"; // soft yellow
 
 export type HoverMode = "full" | "name";
-
-function personColor(h: {
-  contributor_name: string | null;
-  is_anonymous: boolean;
-  contributor_id: string | null;
-}): string {
-  if (h.is_anonymous) return ANONYMOUS_COLOR;
-  const key = (h.contributor_name || h.contributor_id || "").trim().toLowerCase();
-  if (!key) return ANONYMOUS_COLOR;
-  let hash = 2166136261;
-  for (let i = 0; i < key.length; i++) {
-    hash ^= key.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return PERSON_COLORS[(hash >>> 0) % PERSON_COLORS.length];
-}
 
 function mulberry32(seed: number) {
   return function () {
@@ -166,6 +137,7 @@ function Figure({
   placed,
   highlighted,
   figureScale,
+  peepLoaded,
   onEnter,
   onLeave,
   onSelect,
@@ -173,14 +145,20 @@ function Figure({
   placed: Placed;
   highlighted: boolean;
   figureScale: number;
+  peepLoaded: boolean;
   onEnter: () => void;
   onLeave: () => void;
   onSelect: (e: React.MouseEvent) => void;
 }) {
   const { x, y } = placed;
-  const baseFill = personColor(placed.h);
+  const avatar = resolveAvatar(placed.h);
+  const baseFill = avatar.avatarColor;
   const fill = highlighted ? jitterHex(baseFill, -0.45) : baseFill;
   const headR = highlighted ? 3.0 : 2.6;
+  // Peep figure scaled so its height == FIGURE_HEIGHT, centred on x, feet at y.
+  const meta = peepMeta(avatar.avatarId);
+  const peepH = FIGURE_HEIGHT * (highlighted ? 1.12 : 1);
+  const peepW = meta ? peepH * (meta.w / meta.h) : peepH * 0.4;
   // Scale around the figure's feet (which sit at SVG coord y). This makes
   // figures grow sub-linearly with zoom — they get bigger as you zoom in,
   // but more slowly than the viewBox does, so more land shows vs people.
@@ -194,11 +172,24 @@ function Figure({
     >
       <circle cx={0} cy={7} r={HIT_RADIUS} fill="transparent" />
       <ellipse cx={0} cy={FIGURE_HEIGHT + 0.5} rx={3.2} ry={0.9} fill="rgba(0,0,0,0.18)" />
-      <circle cx={0} cy={2.5} r={headR} fill={fill} />
-      <path
-        d={`M -3 5 L 3 5 L 2.2 ${FIGURE_HEIGHT} L -2.2 ${FIGURE_HEIGHT} Z`}
-        fill={fill}
-      />
+      {peepLoaded ? (
+        <use
+          href={`#peep-${avatar.avatarId}`}
+          x={-peepW / 2}
+          y={FIGURE_HEIGHT - peepH}
+          width={peepW}
+          height={peepH}
+          style={{ color: fill }}
+        />
+      ) : (
+        <>
+          <circle cx={0} cy={2.5} r={headR} fill={fill} />
+          <path
+            d={`M -3 5 L 3 5 L 2.2 ${FIGURE_HEIGHT} L -2.2 ${FIGURE_HEIGHT} Z`}
+            fill={fill}
+          />
+        </>
+      )}
     </g>
   );
 }
@@ -641,6 +632,32 @@ export function ClusterMap({
     });
   }, [placed, atoms, atomThemes]);
 
+  // Load the OpenPeeps SVGs for the avatars currently on the map. Each pose is
+  // fetched once (module-cached); figures fall back to a simple silhouette
+  // until their peep arrives, then swap in.
+  const neededPeepIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of placedSnapped) ids.add(resolveAvatar(p.h).avatarId);
+    return Array.from(ids);
+  }, [placedSnapped]);
+
+  const [peepInner, setPeepInner] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    for (const id of neededPeepIds) {
+      if (peepInner[id] !== undefined) continue;
+      loadPeepInner(id).then((inner) => {
+        if (!active) return;
+        setPeepInner((cur) =>
+          cur[id] !== undefined ? cur : { ...cur, [id]: inner },
+        );
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [neededPeepIds, peepInner]);
+
   // Continent labels — positioned at the ATOM centroid of each theme's
   // claimed land, not the figure centroid. This puts the label inside the
   // continent the user actually sees, even when the continent stretches far
@@ -958,6 +975,18 @@ export function ClusterMap({
                       0 0 0 0.09 0"
             />
           </filter>
+          {Object.entries(peepInner).map(([id, inner]) => {
+            if (!inner) return null;
+            const m = peepMeta(id);
+            return (
+              <symbol
+                key={id}
+                id={`peep-${id}`}
+                viewBox={`0 0 ${m?.w ?? 213} ${m?.h ?? 715}`}
+                dangerouslySetInnerHTML={{ __html: inner }}
+              />
+            );
+          })}
         </defs>
         {cellPaths.map((c, i) => (
           <path
@@ -1005,6 +1034,7 @@ export function ClusterMap({
             key={p.h.id}
             placed={p}
             figureScale={figureScale}
+            peepLoaded={!!peepInner[resolveAvatar(p.h).avatarId]}
             highlighted={
               hoveredId === p.h.id ||
               pinnedId === p.h.id ||

@@ -17,6 +17,8 @@ export type Happiness = {
   summary: string | null;
   source: HappinessSource;
   is_anonymous: boolean;
+  avatar_id: string | null;
+  avatar_color: string | null;
   created_at: string;
 };
 
@@ -27,5 +29,7 @@ export type Contributor = {
   avatar_url: string | null;
   daily_reminder_opt_in: boolean;
   timezone: string | null;
+  avatar_id: string | null;
+  avatar_color: string | null;
   created_at: string;
 };

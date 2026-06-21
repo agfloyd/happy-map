@@ -44,3 +44,6 @@ next-env.d.ts
 /_reference/
 /.claude/
 TODO.md
+
+# OpenPeeps raw source material (CC0) — processed output lives in public/peeps/
+OpenPeeps_downloads/

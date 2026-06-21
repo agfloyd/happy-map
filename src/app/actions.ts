@@ -11,8 +11,18 @@ import { buildCelebrationPayload } from "@/lib/celebration";
 import { announceToSignal } from "@/lib/signal";
 
 export type SubmitResult =
-  | { ok: true }
+  | { ok: true; id: string }
   | { ok: false; error: string };
+
+// Basic shape guards for the avatar fields coming from the client.
+function cleanAvatarId(v: FormDataEntryValue | null): string | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  return /^peep-[a-z0-9-]+$/i.test(s) ? s : null;
+}
+function cleanAvatarColor(v: FormDataEntryValue | null): string | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  return /^#[0-9a-f]{6}$/i.test(s) ? s : null;
+}
 
 export async function submitHappiness(formData: FormData): Promise<SubmitResult> {
   const content = String(formData.get("content") ?? "").trim();
@@ -79,6 +89,8 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
 
   const contributorName = isAnonymous ? null : rawName;
   const insertContent: string | null = hasContent ? content : null;
+  const avatar_id = cleanAvatarId(formData.get("avatar_id"));
+  const avatar_color = cleanAvatarColor(formData.get("avatar_color"));
 
   const { data: inserted, error: insertError } = await supabase
     .from("happinesses")
@@ -99,6 +111,16 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
   }
 
   const insertedId = inserted.id;
+
+  // Best-effort: persist the avatar separately so a missing avatar column
+  // (pre-migration 003) never blocks a submission. Falls back to defaults.
+  if (avatar_id && avatar_color) {
+    const { error: avatarErr } = await supabaseAdmin
+      .from("happinesses")
+      .update({ avatar_id, avatar_color })
+      .eq("id", insertedId);
+    if (avatarErr) console.warn("[avatar] save skipped (run migration 003?)", avatarErr.message);
+  }
   after(async () => {
     console.log("[after] starting for", insertedId, {
       hasVoice: !!voice_note_url,
@@ -144,6 +166,47 @@ export async function submitHappiness(formData: FormData): Promise<SubmitResult>
     const payload = await buildCelebrationPayload(insertedId);
     if (payload) await announceToSignal(payload);
   });
+
+  revalidatePath("/");
+  return { ok: true, id: insertedId };
+}
+
+export type SetAvatarResult = { ok: boolean };
+
+/**
+ * Update a moment's avatar (pose + colour) after submission, and — for a named
+ * contributor — apply the same choice to all of their moments so the map stays
+ * consistent. Anonymous picks only touch the one row.
+ */
+export async function setHappinessAvatar(
+  happinessId: string,
+  avatarId: string,
+  avatarColor: string,
+): Promise<SetAvatarResult> {
+  if (!/^[0-9a-f-]{36}$/i.test(happinessId)) return { ok: false };
+  if (!/^peep-[a-z0-9-]+$/i.test(avatarId)) return { ok: false };
+  if (!/^#[0-9a-f]{6}$/i.test(avatarColor)) return { ok: false };
+
+  const { data: row, error: lookupErr } = await supabaseAdmin
+    .from("happinesses")
+    .select("contributor_name, is_anonymous")
+    .eq("id", happinessId)
+    .maybeSingle<{ contributor_name: string | null; is_anonymous: boolean }>();
+  if (lookupErr || !row) return { ok: false };
+
+  const update = { avatar_id: avatarId, avatar_color: avatarColor };
+
+  let query = supabaseAdmin.from("happinesses").update(update);
+  if (!row.is_anonymous && row.contributor_name) {
+    query = query.eq("contributor_name", row.contributor_name);
+  } else {
+    query = query.eq("id", happinessId);
+  }
+  const { error: updateErr } = await query;
+  if (updateErr) {
+    console.error("[setHappinessAvatar] update failed", updateErr);
+    return { ok: false };
+  }
 
   revalidatePath("/");
   return { ok: true };

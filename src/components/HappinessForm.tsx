@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { submitHappiness } from "@/app/actions";
 import { MAX_CONTENT_LENGTH } from "@/lib/types";
+import { AvatarPicker } from "@/components/AvatarPicker";
+import { defaultAvatar, avatarKey, type Avatar } from "@/lib/avatars";
+import { readRememberedIdentity } from "@/lib/avatar-storage";
 import {
   VoiceRecorder,
   type VoiceRecorderHandle,
@@ -144,9 +147,27 @@ export function HappinessForm() {
   const [error, setError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [picker, setPicker] = useState<{
+    id: string;
+    name: string | null;
+    isAnonymous: boolean;
+    current: Avatar;
+  } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const voiceRef = useRef<VoiceRecorderHandle | null>(null);
+  const rememberedAvatarRef = useRef<Avatar | null>(null);
+
+  // On mount, restore a returning visitor's name + remembered avatar.
+  useEffect(() => {
+    const id = readRememberedIdentity();
+    if (!id) return;
+    rememberedAvatarRef.current = {
+      avatarId: id.avatarId,
+      avatarColor: id.avatarColor,
+    };
+    if (id.name) setName((prev) => prev || id.name!);
+  }, []);
 
   const charsLeft = MAX_CONTENT_LENGTH - content.length;
   const overLimit = charsLeft < 0;
@@ -244,11 +265,29 @@ export function HappinessForm() {
       fd.delete("voice_note");
     }
 
+    // Apply the remembered avatar (or a deterministic default) to this moment,
+    // so it lands on the map with a character even if the picker is skipped.
+    const submitName = isAnonymous ? null : name.trim();
+    const current: Avatar =
+      rememberedAvatarRef.current ??
+      defaultAvatar(
+        avatarKey({ contributor_name: submitName, is_anonymous: isAnonymous }),
+        isAnonymous,
+      );
+    fd.set("avatar_id", current.avatarId);
+    fd.set("avatar_color", current.avatarColor);
+
     startTransition(async () => {
       const result = await submitHappiness(fd);
       if (result.ok) {
         resetAll();
         setJustSubmitted(true);
+        setPicker({
+          id: result.id,
+          name: submitName,
+          isAnonymous,
+          current,
+        });
       } else {
         setError(result.error);
       }
@@ -266,6 +305,7 @@ export function HappinessForm() {
   const micActive = voiceStatus === "recording" || voiceStatus === "recorded";
 
   return (
+    <>
     <form
       ref={formRef}
       onSubmit={handleSubmit}
@@ -401,5 +441,25 @@ export function HappinessForm() {
         </div>
       )}
     </form>
+
+    {picker && (
+      <AvatarPicker
+        happinessId={picker.id}
+        name={picker.name}
+        isAnonymous={picker.isAnonymous}
+        current={picker.current}
+        onClose={() => {
+          const id = readRememberedIdentity();
+          if (id) {
+            rememberedAvatarRef.current = {
+              avatarId: id.avatarId,
+              avatarColor: id.avatarColor,
+            };
+          }
+          setPicker(null);
+        }}
+      />
+    )}
+    </>
   );
 }
