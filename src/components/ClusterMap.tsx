@@ -312,12 +312,16 @@ export function ClusterMap({
   items,
   onSelect,
   highlightedId,
+  focus,
   hoverMode = "full",
   fullBleed = false,
 }: {
   items: Happiness[];
   onSelect?: (id: string) => void;
   highlightedId?: string | null;
+  // A request to bring a specific figure into view (pan + zoom + pin). The
+  // `nonce` changes on every request so re-clicking the same item re-focuses.
+  focus?: { id: string; nonce: number } | null;
   hoverMode?: HoverMode;
   fullBleed?: boolean;
 }) {
@@ -863,6 +867,22 @@ export function ClusterMap({
   function resetView() {
     animateView(1, { x: 0, y: 0 });
   }
+
+  // External focus request (e.g. clicking a card in the feed): pan + zoom to
+  // the figure and pin its popover. Keyed on nonce so repeat clicks re-trigger.
+  const focusNonce = focus?.nonce;
+  useEffect(() => {
+    if (!focus) return;
+    const target = placedSnapped.find((p) => p.h.id === focus.id);
+    if (!target) return;
+    const z = 2.6;
+    animateView(
+      z,
+      clampPan(target.x - WIDTH / z / 2, target.y - HEIGHT / z / 2, z),
+    );
+    setPinnedId(focus.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce]);
 
   function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
     if (e.button !== 0) return;

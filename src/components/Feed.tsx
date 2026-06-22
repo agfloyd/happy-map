@@ -56,15 +56,29 @@ function ContentBlock({ h }: { h: Happiness }) {
 function HappinessCard({
   h,
   highlighted,
+  onSelect,
 }: {
   h: Happiness;
   highlighted: boolean;
+  onSelect?: (id: string) => void;
 }) {
   const displayName = h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
 
   return (
     <article
+      onClick={() => onSelect?.(h.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(h.id);
+        }
+      }}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      title={onSelect ? "Show on the map" : undefined}
       className={`rounded-xl border bg-white dark:bg-zinc-950 p-3 shadow-sm transition-shadow ${
+        onSelect ? "cursor-pointer hover:shadow-md hover:border-zinc-300 dark:hover:border-zinc-700" : ""
+      } ${
         highlighted
           ? "border-zinc-400 dark:border-zinc-500 ring-2 ring-zinc-300 dark:ring-zinc-600"
           : "border-zinc-200 dark:border-zinc-800"
@@ -76,6 +90,7 @@ function HappinessCard({
           src={h.voice_note_url}
           controls
           preload="metadata"
+          onClick={(e) => e.stopPropagation()}
           className="mt-2 h-8 w-full"
         />
       )}
@@ -104,9 +119,11 @@ function HappinessCard({
 export function Feed({
   items,
   highlightedId,
+  onSelect,
 }: {
   items: Happiness[];
   highlightedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -120,7 +137,11 @@ export function Feed({
     <ul className="space-y-3">
       {items.map((h) => (
         <li key={h.id} id={`feed-${h.id}`} className="scroll-mt-4">
-          <HappinessCard h={h} highlighted={highlightedId === h.id} />
+          <HappinessCard
+            h={h}
+            highlighted={highlightedId === h.id}
+            onSelect={onSelect}
+          />
         </li>
       ))}
     </ul>

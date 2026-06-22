@@ -116,9 +116,11 @@ function HoverModeToggle({
 export function HomeView({ initial }: { initial: Happiness[] }) {
   const [items, setItems] = useState<Happiness[]>(initial);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [hoverMode, setHoverMode] = useState<HoverMode>("full");
   const [feedHidden, setFeedHidden] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapRef = useRef<HTMLDivElement | null>(null);
 
   // `items` is kept newest-first (server query orders desc, realtime inserts
   // unshift), so the head is the newest landing and length is the total.
@@ -162,6 +164,15 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
     setHighlightedId(id);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightedId(null), 1800);
+  }
+
+  // Clicking a card in the feed brings that moment up on the map.
+  function handleFeedSelect(id: string) {
+    setFocus({ id, nonce: Date.now() });
+    handleSelect(id);
+    // In the stacked (narrow) layout the map sits above the feed — scroll it
+    // into view so the user sees the focused figure. No-op if already visible.
+    mapRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   useEffect(() => {
@@ -268,11 +279,12 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
       </div>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="grid gap-4 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 relative">
+          <div className="min-w-0 relative" ref={mapRef}>
             <ClusterMap
               items={items}
               onSelect={handleSelect}
               highlightedId={highlightedId}
+              focus={focus}
               hoverMode={hoverMode}
             />
             <button
@@ -295,7 +307,11 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
               <h2 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500 mb-2 px-1">
                 Recent moments
               </h2>
-              <Feed items={items} highlightedId={highlightedId} />
+              <Feed
+                items={items}
+                highlightedId={highlightedId}
+                onSelect={handleFeedSelect}
+              />
             </section>
           </aside>
         </div>
