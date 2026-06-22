@@ -25,7 +25,7 @@ const REGION_REACH = 95;
 const FIGURE_HEIGHT = 14;
 // Visual size multiplier for the peep figures (feet stay anchored to the
 // ground; they grow upward). Doesn't affect placement/snapping math.
-const PEEP_SCALE = 2.5;
+const PEEP_SCALE = 1.75;
 const HIT_RADIUS = 14;
 const MARGIN_X = 60;
 const MARGIN_Y = 48;
