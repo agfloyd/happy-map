@@ -257,21 +257,6 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           >
             Happy Map
           </h1>
-          <p
-            className="mt-1 text-sm text-zinc-600 dark:text-zinc-400"
-            style={{ fontFamily: "var(--font-fredoka)" }}
-          >
-            text <span className="font-bold">join zoo-swam</span> to{" "}
-            <a
-              href="https://wa.me/14155238886?text=join%20zoo-swam"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline decoration-zinc-400 dark:decoration-zinc-600 underline-offset-2 hover:decoration-zinc-700 dark:hover:decoration-zinc-300"
-            >
-              +1 415 523 8886
-            </a>{" "}
-            on WhatsApp
-          </p>
         </header>
         <div className="mt-4">
           <ActivityTicker count={total} newest={newest} />
@@ -303,6 +288,21 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
           </div>
           <aside className="space-y-4 min-w-0">
             <HappinessForm />
+            <p
+              className="-mt-1 px-1 text-xs text-zinc-500 dark:text-zinc-400"
+              style={{ fontFamily: "var(--font-fredoka)" }}
+            >
+              or text <span className="font-bold">join zoo-swam</span> to{" "}
+              <a
+                href="https://wa.me/14155238886?text=join%20zoo-swam"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-zinc-400 dark:decoration-zinc-600 underline-offset-2 hover:decoration-zinc-700 dark:hover:decoration-zinc-300"
+              >
+                +1 415 523 8886
+              </a>{" "}
+              on WhatsApp
+            </p>
             <section>
               <h2 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500 mb-2 px-1">
                 Recent moments
