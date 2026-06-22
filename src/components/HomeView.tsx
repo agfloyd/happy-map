@@ -121,6 +121,7 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
   const [feedHidden, setFeedHidden] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const feedScrollRef = useRef<HTMLDivElement | null>(null);
 
   // `items` is kept newest-first (server query orders desc, realtime inserts
   // unshift), so the head is the newest landing and length is the total.
@@ -158,18 +159,24 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
     };
   }, []);
 
-  function handleSelect(id: string) {
-    // Highlight the matching feed card if it's visible, but don't scroll —
-    // the map is the main view, the page should stay put.
+  function flashHighlight(id: string) {
     setHighlightedId(id);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightedId(null), 1800);
   }
 
+  // Clicking a figure on the map: highlight its feed card and scroll the
+  // embedded feed to it (the map stays pinned where it is).
+  function handleSelect(id: string) {
+    flashHighlight(id);
+    const card = document.getElementById(`feed-${id}`);
+    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   // Clicking a card in the feed brings that moment up on the map.
   function handleFeedSelect(id: string) {
     setFocus({ id, nonce: Date.now() });
-    handleSelect(id);
+    flashHighlight(id);
     // In the stacked (narrow) layout the map sits above the feed — scroll it
     // into view so the user sees the focused figure. No-op if already visible.
     mapRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -248,8 +255,8 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
   }
 
   return (
-    <main className="w-full py-6 sm:py-10">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-6">
+    <main className="h-[100dvh] flex flex-col overflow-hidden">
+      <div className="shrink-0 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
         <header>
           <h1
             className="text-3xl sm:text-4xl font-bold tracking-wide"
@@ -258,19 +265,21 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             Happy Map
           </h1>
         </header>
-        <div className="mt-4">
+        <div className="mt-3">
           <ActivityTicker count={total} newest={newest} />
         </div>
       </div>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="grid gap-4 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 relative" ref={mapRef}>
+      <div className="flex-1 min-h-0 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4 pb-4 flex flex-col lg:flex-row gap-4 lg:gap-6">
+        {/* Map column — pinned (does not scroll with the feed) */}
+        <div className="min-h-0 flex-[2] lg:flex-1 lg:min-w-0 flex flex-col gap-2">
+          <div className="relative flex-1 min-h-0" ref={mapRef}>
             <ClusterMap
               items={items}
               onSelect={handleSelect}
               highlightedId={highlightedId}
               focus={focus}
               hoverMode={hoverMode}
+              fill
             />
             <button
               type="button"
@@ -281,40 +290,44 @@ export function HomeView({ initial }: { initial: Happiness[] }) {
             >
               <ChevronRight className="h-4 w-4" />
             </button>
-            <div className="mt-3 flex justify-center items-center gap-2">
-              <ThemeToggle />
-              <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
-            </div>
           </div>
-          <aside className="space-y-4 min-w-0">
-            <HappinessForm />
-            <p
-              className="-mt-1 px-1 text-xs text-zinc-500 dark:text-zinc-400"
-              style={{ fontFamily: "var(--font-fredoka)" }}
-            >
-              or text <span className="font-bold">join zoo-swam</span> to{" "}
-              <a
-                href="https://wa.me/14155238886?text=join%20zoo-swam"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline decoration-zinc-400 dark:decoration-zinc-600 underline-offset-2 hover:decoration-zinc-700 dark:hover:decoration-zinc-300"
-              >
-                +1 415 523 8886
-              </a>{" "}
-              on WhatsApp
-            </p>
-            <section>
-              <h2 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500 mb-2 px-1">
-                Recent moments
-              </h2>
-              <Feed
-                items={items}
-                highlightedId={highlightedId}
-                onSelect={handleFeedSelect}
-              />
-            </section>
-          </aside>
+          <div className="shrink-0 flex justify-center items-center gap-2">
+            <ThemeToggle />
+            <HoverModeToggle mode={hoverMode} onChange={setHoverMode} />
+          </div>
         </div>
+        {/* Feed column — form + join line pinned; the list scrolls internally */}
+        <aside className="min-h-0 flex-[3] lg:flex-none lg:w-[360px] flex flex-col gap-3 min-w-0 overflow-hidden">
+          <HappinessForm />
+          <p
+            className="-mt-1 px-1 text-xs text-zinc-500 dark:text-zinc-400 shrink-0"
+            style={{ fontFamily: "var(--font-fredoka)" }}
+          >
+            or text <span className="font-bold">join zoo-swam</span> to{" "}
+            <a
+              href="https://wa.me/14155238886?text=join%20zoo-swam"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-zinc-400 dark:decoration-zinc-600 underline-offset-2 hover:decoration-zinc-700 dark:hover:decoration-zinc-300"
+            >
+              +1 415 523 8886
+            </a>{" "}
+            on WhatsApp
+          </p>
+          <h2 className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500 px-1">
+            Recent moments
+          </h2>
+          <div
+            ref={feedScrollRef}
+            className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1"
+          >
+            <Feed
+              items={items}
+              highlightedId={highlightedId}
+              onSelect={handleFeedSelect}
+            />
+          </div>
+        </aside>
       </div>
     </main>
   );

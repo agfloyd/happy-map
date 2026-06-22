@@ -201,6 +201,20 @@ function displayName(h: Happiness): string {
   return h.is_anonymous ? "Anonymous" : h.contributor_name || "Anonymous";
 }
 
+// Relative time, matching the feed's formatting ("9h ago" / "11d ago").
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 function PopoverCard({ h, variant }: { h: Happiness; variant: "full" | "name" }) {
   if (variant === "name") {
     return (
@@ -234,6 +248,7 @@ function PopoverCard({ h, variant }: { h: Happiness; variant: "full" | "name" })
         </div>
         <div className="mt-1 text-[10px] text-zinc-300">
           {displayName(h)}
+          {` · ${timeAgo(h.created_at)}`}
           {h.theme ? ` · ${h.theme}` : ""}
         </div>
       </div>
@@ -315,6 +330,7 @@ export function ClusterMap({
   focus,
   hoverMode = "full",
   fullBleed = false,
+  fill = false,
 }: {
   items: Happiness[];
   onSelect?: (id: string) => void;
@@ -324,6 +340,9 @@ export function ClusterMap({
   focus?: { id: string; nonce: number } | null;
   hoverMode?: HoverMode;
   fullBleed?: boolean;
+  // Fill the parent box (parent controls size) instead of using the map's own
+  // aspect ratio. Keeps the rounded card border (unlike fullBleed).
+  fill?: boolean;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
@@ -961,13 +980,15 @@ export function ClusterMap({
       className={`relative overflow-hidden ${
         fullBleed
           ? "w-full h-full"
+          : fill
+          ? "w-full h-full rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
           : "w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
       }`}
-      style={fullBleed ? undefined : { aspectRatio: `${WIDTH} / ${HEIGHT}` }}
+      style={fullBleed || fill ? undefined : { aspectRatio: `${WIDTH} / ${HEIGHT}` }}
     >
       <svg
         viewBox={viewBox}
-        preserveAspectRatio={fullBleed ? "xMidYMid meet" : "xMidYMid slice"}
+        preserveAspectRatio={fullBleed || fill ? "xMidYMid meet" : "xMidYMid slice"}
         className="block w-full h-full select-none"
         style={{
           background: OCEAN_COLOR,
