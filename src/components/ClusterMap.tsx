@@ -23,6 +23,9 @@ const WAVE_COUNT = 110;
 // reach of each continent past its figure cluster.
 const REGION_REACH = 95;
 const FIGURE_HEIGHT = 14;
+// Visual size multiplier for the peep figures (feet stay anchored to the
+// ground; they grow upward). Doesn't affect placement/snapping math.
+const PEEP_SCALE = 2.5;
 const HIT_RADIUS = 14;
 const MARGIN_X = 60;
 const MARGIN_Y = 48;
@@ -157,7 +160,7 @@ function Figure({
   const headR = highlighted ? 3.0 : 2.6;
   // Peep figure scaled so its height == FIGURE_HEIGHT, centred on x, feet at y.
   const meta = peepMeta(avatar.avatarId);
-  const peepH = FIGURE_HEIGHT * (highlighted ? 1.12 : 1);
+  const peepH = FIGURE_HEIGHT * PEEP_SCALE * (highlighted ? 1.12 : 1);
   const peepW = meta ? peepH * (meta.w / meta.h) : peepH * 0.4;
   // Scale around the figure's feet (which sit at SVG coord y). This makes
   // figures grow sub-linearly with zoom — they get bigger as you zoom in,
